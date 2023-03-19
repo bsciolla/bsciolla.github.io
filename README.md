@@ -1,3 +1,0 @@
-# bsciolla.github.io
-
-Hello
