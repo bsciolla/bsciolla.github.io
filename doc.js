@@ -57,6 +57,10 @@ function blockClick(x, y){
 }
 
 function tryFlipBlock(i, j){
+    try{
+        let point = map[i][j];
+    }
+    catch{ return; }
     if (map[i][j] !== undefined){
         selectionIndex++;      
 
@@ -408,6 +412,11 @@ function animate(){
 }
 init();
 animate();
+
+function reloadMap(){
+    numberOfSorts = parseInt(document.getElementById("numberOfSortsInput").value);
+    init();
+}
 
 window.addEventListener("resize", function(){
 })
