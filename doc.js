@@ -1,13 +1,12 @@
 const canvas = document.getElementById("canvas1");
 const canvasdraw = canvas.getContext("2d");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+canvas.width = 1000;
+canvas.height = 3000;
 
 let map = [];
 let car = undefined;
 let theta;
 let score = 0;
-let absolutescore = 20.0;
 let height = 20;
 let gridSize = 50;
 let blockSize = 40;
@@ -283,14 +282,25 @@ class Car {
         this.y = 400;
         this.vy = 1;
         this.vx = 0;
-        this.speed = 1;
+        this.speed = 2;
         this.angle = Math.PI/2.0;
     }
     move(){
+        this.angle = this.angle + (Math.random() - 0.5) * 0.1;
         this.vx = this.speed * Math.cos(this.angle);
         this.vy = this.speed * Math.sin(this.angle);
         this.x += this.vx;
         this.y += this.vy;
+        if (this.x > canvas.width){
+            this.x = 0;
+        } else if (this.x < 0){
+            this.x = canvas.width;
+        }
+        if (this.y > canvas.height){
+            this.y = 0;
+        } else if (this.y < 0){
+            this.y = canvas.height;
+        }
     }
     draw(){
         let transform = position(this.x, this.y);
@@ -400,7 +410,4 @@ init();
 animate();
 
 window.addEventListener("resize", function(){
-    // canvas.width = innerWidth;
-    // canvas.height = innerHeight;
-    // init();
 })
