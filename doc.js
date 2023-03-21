@@ -18,6 +18,7 @@ let numberOfSorts = 26;
 let gridWidth = 20;
 let gridHeight = 50;
 let matchingDistance = Math.max(gridWidth, gridHeight);
+let closeRange = 5;
 
 const mouse = {
     x: undefined,
@@ -36,12 +37,12 @@ function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min) + min);
 }
 
-window.addEventListener("mousemove", function(e){
+/*window.addEventListener("mousemove", function(e){
     mouse.x = e.x;
     mouse.y = e.y;
-});
+});*/
 
-window.addEventListener("click", function(e){
+window.addEventListener("mousedown", function(e){
     height = height * 1.2;
     const rect = canvas.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -62,22 +63,47 @@ function tryFlipBlock(i, j){
     }
     catch{ return; }
     if (map[i][j] !== undefined){
-        selectionIndex++;      
-
-        relateElements(previousSelectedBlock, map[i][j]);
-
-        if (map[i][j].removed !== true){
-            map[i][j].selected = selectionIndex;
-            previousSelectedBlock = map[i][j];
+        let linked = relateElements(previousSelectedBlock, map[i][j]);
+        if (!linked) {
+            linked = relateToNearbyElement(i, j);    
         }
-        
-        if (map[i][j].color === null){
-            map[i][j].color = 0;
-        }
-        else{
-            map[i][j].color += 50;
+        if (!linked){
+            selectElement(map[i][j]);
         }
     }
+}
+
+function selectElement(block) {
+    if (block.removed !== true){
+        selectionIndex++;
+        block.selected = selectionIndex;
+        previousSelectedBlock = block;
+    }
+}
+
+function relateToNearbyElement(iref, jref) {
+    let clickedBlock = map[iref][jref];
+    
+    for (var i = Math.max(iref - closeRange, 1);
+         i <= Math.min(iref + closeRange, gridHeight);
+         i++){
+
+        for (var j = Math.max(jref - closeRange, 1);
+            j <= Math.min(jref + closeRange, gridWidth);
+            j++){
+     
+            let targetBlock = map[i][j]; 
+            if (targetBlock.removed !== true
+                && clickedBlock.sort === targetBlock.sort){
+                if (relateElements(clickedBlock, targetBlock)){
+                    return true;
+                }
+            }
+        }
+
+    }
+
+    return false;
 }
 
 function relateElements(block1, block2){
@@ -100,8 +126,11 @@ function relateElements(block1, block2){
             || followALineMatchY(block1, block2, -1);
         if (possible){
             match(block1, block2);
+            return true;
         }
     }
+
+    return false;
 }
 
 
@@ -323,13 +352,12 @@ class Block {
         this.theta = 0;
         this.phi = 0;
         this.radius = radius;
-        this.color = null;
     }
     move(){
     }
     draw(){
         let transform = position(this.x, this.y);
-        let color = this.color;
+        
         if (this.removed === true){
             return;
         }
@@ -345,7 +373,7 @@ class Block {
         let green1 = this.coloring(3);
         let red1 = this.coloring(4);
         let blue1 = this.coloring(5);
-        color = "rgba(" + green * 200 + ',' + red * 200 + "," + blue * 200 + "0,255)"; 
+        let color = "rgba(" + green * 200 + ',' + red * 200 + "," + blue * 200 + "0,255)"; 
     
         drawRectangle(color, transform, this.radius);
         if (green1 + red1 + blue1 > 0){
