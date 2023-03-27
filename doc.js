@@ -14,9 +14,9 @@ let originx = 0;
 let originy = 0;
 let previousSelectedBlock = null;
 let selectionIndex = 0;
-let numberOfSorts = 14;
-let gridWidth = 20;
-let gridHeight = 50;
+let numberOfSorts = 26;
+let gridWidth = 18;
+let gridHeight = 18;
 let matchingDistance = Math.max(gridWidth, gridHeight);
 let closeRange = 5;
 
@@ -360,10 +360,23 @@ class Block {
             "rgba(250,250,0,255)",
             "rgba(100,100,100,255)"];
         this.colorpairs = [
-            [[185,152,37],[71,57,12]],
-            [[23,108,112],[7,41,43]],
-            [[105,27,122],[40,9,46]],];
-    }   
+            [[155,  0,  0],[255,  0,  0]],
+            [[155,103,  0],[255,170,  0]],
+            [[ 13, 49, 132],[37, 94, 235]],
+            [[  0,124,  0],[ 0,204,  0]],];
+        this.allcolors = [
+            [0,  0,  0],[255,  0,  0],
+            [255,170,  0],
+            [37, 94, 235],
+            [ 0,204,  0],];
+        /* this.allcolors = [
+                [155,  0,  0],[255,  0,  0],
+                [155,103,  0],[255,170,  0],
+                [ 13, 49, 132],[37, 94, 235],
+                [  0,124,  0],[ 0,204,  0],];*/
+    }
+
+
     move(){
     }
     draw(){
@@ -378,23 +391,19 @@ class Block {
         
         if (this.sort === null){ return; }
 
-        let step1color = this.coloring(this.sort, 3);
-        let step2color = this.coloring(step1color.remains, 2);
+        let step1color = this.coloring(this.sort, 5);
+        let step2color = this.coloring(step1color.remains, 4);
         let step3color = this.coloring(step2color.remains, 5);
 
         let index1 = step1color.value;
         let index2 = step2color.value;
         let index3 = step3color.value;
-        let colorpair = this.colorpairs[index1];
-        
+        // let colorpair = this.allcolors[index1];
+
         let color1, color2;
-        if (index2 === 0){
-            color1 = this.colorFromArray(colorpair[0]);
-            color2 = this.colorFromArray(colorpair[1]);
-        } else {
-            color1 = this.colorFromArray(colorpair[1]);
-            color2 = this.colorFromArray(colorpair[0]);
-        }      
+        index2 = index2 < index1 ? index2 : index2 + 1;
+        color1 = this.colorFromArray(this.allcolors[index1]);
+        color2 = this.colorFromArray(this.allcolors[index2]);   
 
         if (index3 === 0) {
             let innertransform1 = position(this.x, this.y);
