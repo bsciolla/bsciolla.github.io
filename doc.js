@@ -14,10 +14,11 @@ let originx = 0;
 let originy = 0;
 let previousSelectedBlock = null;
 let selectionIndex = 0;
-let numberOfSorts = 26;
+let numberOfSorts = 14;
 let gridWidth = 20;
 let gridHeight = 50;
 let matchingDistance = Math.max(gridWidth, gridHeight);
+let closeRange = 5;
 
 const mouse = {
     x: undefined,
@@ -36,12 +37,12 @@ function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min) + min);
 }
 
-window.addEventListener("mousemove", function(e){
+/*window.addEventListener("mousemove", function(e){
     mouse.x = e.x;
     mouse.y = e.y;
-});
+});*/
 
-window.addEventListener("click", function(e){
+window.addEventListener("mousedown", function(e){
     height = height * 1.2;
     const rect = canvas.getBoundingClientRect()
     const x = e.clientX - rect.left
@@ -62,22 +63,47 @@ function tryFlipBlock(i, j){
     }
     catch{ return; }
     if (map[i][j] !== undefined){
-        selectionIndex++;      
-
-        relateElements(previousSelectedBlock, map[i][j]);
-
-        if (map[i][j].removed !== true){
-            map[i][j].selected = selectionIndex;
-            previousSelectedBlock = map[i][j];
+        let linked = relateElements(previousSelectedBlock, map[i][j]);
+        if (!linked) {
+            linked = relateToNearbyElement(i, j);    
         }
-        
-        if (map[i][j].color === null){
-            map[i][j].color = 0;
-        }
-        else{
-            map[i][j].color += 50;
+        if (!linked){
+            selectElement(map[i][j]);
         }
     }
+}
+
+function selectElement(block) {
+    if (block.removed !== true){
+        selectionIndex++;
+        block.selected = selectionIndex;
+        previousSelectedBlock = block;
+    }
+}
+
+function relateToNearbyElement(iref, jref) {
+    let clickedBlock = map[iref][jref];
+    
+    for (var i = Math.max(iref - closeRange, 0);
+         i <= Math.min(iref + closeRange, gridHeight);
+         i++){
+
+        for (var j = Math.max(jref - closeRange, 0);
+            j <= Math.min(jref + closeRange, gridWidth);
+            j++){
+     
+            let targetBlock = map[i][j]; 
+            if (targetBlock.removed !== true
+                && clickedBlock.sort === targetBlock.sort){
+                if (relateElements(clickedBlock, targetBlock)){
+                    return true;
+                }
+            }
+        }
+
+    }
+
+    return false;
 }
 
 function relateElements(block1, block2){
@@ -100,8 +126,11 @@ function relateElements(block1, block2){
             || followALineMatchY(block1, block2, -1);
         if (possible){
             match(block1, block2);
+            return true;
         }
     }
+
+    return false;
 }
 
 
@@ -323,13 +352,23 @@ class Block {
         this.theta = 0;
         this.phi = 0;
         this.radius = radius;
-        this.color = null;
-    }
+        this.colormap = [
+            "rgba(0,0,0,255)",
+            "rgba(200,0,0,255)",
+            "rgba(0,200,0,255)",
+            "rgba(0,0,200,255)",
+            "rgba(250,250,0,255)",
+            "rgba(100,100,100,255)"];
+        this.colorpairs = [
+            [[185,152,37],[71,57,12]],
+            [[23,108,112],[7,41,43]],
+            [[105,27,122],[40,9,46]],];
+    }   
     move(){
     }
     draw(){
         let transform = position(this.x, this.y);
-        let color = this.color;
+        
         if (this.removed === true){
             return;
         }
@@ -339,23 +378,58 @@ class Block {
         
         if (this.sort === null){ return; }
 
-        let green = this.coloring(0);
-        let red = this.coloring(1);
-        let blue = this.coloring(2);
-        let green1 = this.coloring(3);
-        let red1 = this.coloring(4);
-        let blue1 = this.coloring(5);
-        color = "rgba(" + green * 200 + ',' + red * 200 + "," + blue * 200 + "0,255)"; 
-    
-        drawRectangle(color, transform, this.radius);
-        if (green1 + red1 + blue1 > 0){
-            let innnercolor = "rgba(" + green1 * 255 + ',' + red1 * 255 + "," + blue1 * 255 + "0,255)"; 
+        let step1color = this.coloring(this.sort, 3);
+        let step2color = this.coloring(step1color.remains, 2);
+        let step3color = this.coloring(step2color.remains, 5);
+
+        let index1 = step1color.value;
+        let index2 = step2color.value;
+        let index3 = step3color.value;
+        let colorpair = this.colorpairs[index1];
+        
+        let color1, color2;
+        if (index2 === 0){
+            color1 = this.colorFromArray(colorpair[0]);
+            color2 = this.colorFromArray(colorpair[1]);
+        } else {
+            color1 = this.colorFromArray(colorpair[1]);
+            color2 = this.colorFromArray(colorpair[0]);
+        }      
+
+        if (index3 === 0) {
+            let innertransform1 = position(this.x, this.y);
+            drawRectangle(color1, innertransform1, this.radius);
             let innertransform = position(this.x + this.radius/4, this.y + this.radius/4);
-            drawRectangle(innnercolor, innertransform, this.radius/2);
+            drawRectangle(color2, innertransform, this.radius/2);
+        }
+        if (index3 === 1) {
+            let innertransform1 = position(this.x, this.y);
+            let innertransform2 = position(this.x, this.y + 2 * this.radius/3);
+            drawRectangle(color2, innertransform1, this.radius, 2 * this.radius/3);
+            drawRectangle(color1, innertransform2, this.radius, 1 * this.radius/3);
+        }
+        if (index3 === 2) {
+            let innertransform1 = position(this.x, this.y);
+            let innertransform2 = position(this.x +  2 * this.radius/3, this.y);
+            drawRectangle(color2, innertransform1,  2 * this.radius/3, this.radius);
+            drawRectangle(color1, innertransform2, this.radius/3, this.radius);
+        }
+        if (index3 === 3) {
+            drawRectangle(color2, transform, this.radius);
+            let innertransform = position(this.x + this.radius/4, this.y + this.radius/4);
+            drawRectangle(color1, innertransform, this.radius/2);
         }
     }
-    coloring(rank){
-        return Math.floor(this.sort / (2 ** rank) % 2);
+
+    colorFromArray(colorarray){
+        return "rgba(" + colorarray[0] +  "," + colorarray[1] + "," + + colorarray[2] + ")";
+    }
+
+    coloring(input, dividend){
+        return {
+            value: input % dividend,
+            remains: Math.floor(input / dividend),
+        };
     }
 }
 
@@ -367,10 +441,13 @@ function drawVoidRectangle(color, transform, radius){
     canvasdraw.strokeRect(transform.x, transform.y, radius, radius);
 }
 
-function drawRectangle(color, transform, radius){
+function drawRectangle(color, transform, radius, radius2){
     canvasdraw.fillStyle = color;
-    canvasdraw.fillRect(transform.x, transform.y, radius, radius);
+    if (radius2 === undefined) { radius2 = radius ;}
+    canvasdraw.fillRect(transform.x, transform.y, radius, radius2);
 }
+
+
 
 function init(){
     console.log(Math.cos(360));
@@ -391,7 +468,7 @@ function init(){
             // don't worry about i<>j here
             createdBlock.i = j;
             createdBlock.j = i;
-            createdBlock.sort = getRandomInt(0, numberOfSorts);
+            createdBlock.sort = getRandomInt(0, numberOfSorts - 1);
             row[i] = createdBlock;
         }
         map[j] = row;
