@@ -1,7 +1,6 @@
 const canvas = document.getElementById("canvas1");
 const canvasdraw = canvas.getContext("2d");
-canvas.width = 1000;
-canvas.height = 3000;
+
 
 let map = [];
 let car = undefined;
@@ -19,7 +18,9 @@ let gridWidth = 18;
 let gridHeight = 18;
 let matchingDistance = Math.max(gridWidth, gridHeight);
 let closeRange = 5;
-
+let miniMargin = 0;
+canvas.height = gridSize * gridHeight;
+canvas.width = gridSize * gridWidth;
 const mouse = {
     x: undefined,
     y: undefined
@@ -413,15 +414,15 @@ class Block {
         }
         if (index3 === 1) {
             let innertransform1 = position(this.x, this.y);
-            let innertransform2 = position(this.x, this.y + 2 * this.radius/3);
-            drawRectangle(color2, innertransform1, this.radius, 2 * this.radius/3);
-            drawRectangle(color1, innertransform2, this.radius, 1 * this.radius/3);
+            let innertransform2 = position(this.x + miniMargin * this.radius, this.y + 0.6 * this.radius);
+            drawRectangle(color2, innertransform1, this.radius, this.radius);
+            drawRectangle(color1, innertransform2, this.radius * (1 - 2 * miniMargin), 0.25 * this.radius);
         }
         if (index3 === 2) {
             let innertransform1 = position(this.x, this.y);
-            let innertransform2 = position(this.x +  2 * this.radius/3, this.y);
-            drawRectangle(color2, innertransform1,  2 * this.radius/3, this.radius);
-            drawRectangle(color1, innertransform2, this.radius/3, this.radius);
+            let innertransform2 = position(this.x +  0.6 * this.radius, this.y);
+            drawRectangle(color2, innertransform1, this.radius, this.radius);
+            drawRectangle(color1, innertransform2, 0.25 * this.radius, this.radius);
         }
         if (index3 === 3) {
             drawRectangle(color2, transform, this.radius);
@@ -465,12 +466,12 @@ function init(){
     for (var j = 0; j <= gridHeight; j++) {
         let row = [];
         for (var i = 0; i <= gridWidth; i++) {
-            let eye = {
+            let block = {
                 x: i * gridSize + 10,
                 y: j * gridSize + 10,
                 radius: blockSize,
             };
-            let createdBlock = new Block(eye.x, eye.y, eye.radius);
+            let createdBlock = new Block(block.x, block.y, block.radius);
             if (Math.random() > 0.5) {createdBlock.bonus = true;}
             else {createdBlock.bonus = false;}
             
