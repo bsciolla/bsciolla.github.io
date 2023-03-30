@@ -118,7 +118,7 @@ function relateElements(block1, block2){
 
     let possible1 = squareMatch(block1, block2);
     if (possible1){
-        match(block1, block2);
+        match(block1, block2, 2);
     } else {
         let possible =
             followALineMatchX(block1, block2, 1)
@@ -126,7 +126,7 @@ function relateElements(block1, block2){
             || followALineMatchY(block1, block2, 1)
             || followALineMatchY(block1, block2, -1);
         if (possible){
-            match(block1, block2);
+            match(block1, block2, 3);
             return true;
         }
     }
@@ -264,7 +264,7 @@ function checkLineY(block1, block2, jmini, deltaj, i){
 }
 
 
-function match(block1, block2){
+function match(block1, block2, turns){
     if (block1.sort !== block2.sort)
     {
         return;
@@ -390,7 +390,7 @@ class Block {
             drawVoidRectangle("rgba(255,0,255,255)", transform, this.radius);
         }
         
-        if (this.sort === null){ return; }
+        if (this.sort === -1){ return; }
 
         let step1color = this.coloring(this.sort, 5);
         let step2color = this.coloring(step1color.remains, 4);
@@ -462,28 +462,44 @@ function drawRectangle(color, transform, radius, radius2){
 function init(){
     console.log(Math.cos(360));
     car = new Car();
-   
+    let blocksToAttribute = [];
     for (var j = 0; j <= gridHeight; j++) {
         let row = [];
         for (var i = 0; i <= gridWidth; i++) {
             let block = {
+                i: j,
+                j: i,
                 x: i * gridSize + 10,
                 y: j * gridSize + 10,
                 radius: blockSize,
             };
             let createdBlock = new Block(block.x, block.y, block.radius);
-            if (Math.random() > 0.5) {createdBlock.bonus = true;}
-            else {createdBlock.bonus = false;}
-            
             // don't worry about i<>j here
             createdBlock.i = j;
             createdBlock.j = i;
-            createdBlock.sort = getRandomInt(0, numberOfSorts - 1);
+            createdBlock.sort = -1;
+            blocksToAttribute.push(createdBlock);
             row[i] = createdBlock;
         }
         map[j] = row;
     }
+    let goOn = true;
+    while(goOn)
+    {
+        let newSort = getRandomInt(0, numberOfSorts - 1);
+        blocksToAttribute[0].sort = newSort;
+        let rank = getRandomInt(0, blocksToAttribute.length - 1);
+        blocksToAttribute[rank].sort = newSort;
+        blocksToAttribute = blocksToAttribute.filter(b => b.sort === -1);
+        goOn = blocksToAttribute.length >= 2;
+    }
+        
+
+            
+            
 }
+
+
 function animate(){
     requestAnimationFrame(animate);
     canvasdraw.fillStyle = "rgba(255, 255, 255, 0.75)";
