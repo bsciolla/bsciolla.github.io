@@ -1,7 +1,6 @@
 const canvas = document.getElementById("canvas1");
 const canvasdraw = canvas.getContext("2d");
-canvas.width = 1000;
-canvas.height = 3000;
+
 
 let map = [];
 let car = undefined;
@@ -19,7 +18,9 @@ let gridWidth = 18;
 let gridHeight = 18;
 let matchingDistance = Math.max(gridWidth, gridHeight);
 let closeRange = 5;
-
+let miniMargin = 0;
+canvas.height = gridSize * gridHeight;
+canvas.width = gridSize * gridWidth;
 const mouse = {
     x: undefined,
     y: undefined
@@ -117,7 +118,7 @@ function relateElements(block1, block2){
 
     let possible1 = squareMatch(block1, block2);
     if (possible1){
-        match(block1, block2);
+        match(block1, block2, 2);
     } else {
         let possible =
             followALineMatchX(block1, block2, 1)
@@ -125,7 +126,7 @@ function relateElements(block1, block2){
             || followALineMatchY(block1, block2, 1)
             || followALineMatchY(block1, block2, -1);
         if (possible){
-            match(block1, block2);
+            match(block1, block2, 3);
             return true;
         }
     }
@@ -263,7 +264,7 @@ function checkLineY(block1, block2, jmini, deltaj, i){
 }
 
 
-function match(block1, block2){
+function match(block1, block2, turns){
     if (block1.sort !== block2.sort)
     {
         return;
@@ -345,6 +346,37 @@ class Car {
     }
 }
 
+let colorAssociations = [[]];
+
+let allColorStrings = 
+    ["B", "R", "O", "U", "G"];
+let allColorsRgb = [
+    [0, 0, 0],
+    [255, 0, 0],
+    [255, 170, 0],
+    [37, 94, 255],
+    [0, 204, 0],];
+
+function stringToColor(color){
+    let index = allColorStrings.indexOf(color);
+    if (index >= 0){
+        return colorFromArray(allColorsRgb[index]);
+    }
+
+    return null;
+}
+
+function colorFromArray(colorarray){
+    return "rgba(" + colorarray[0] +  "," + colorarray[1] + "," + + colorarray[2] + ")";
+}
+
+function coloring(input, dividend){
+    return {
+        value: input % dividend,
+        remains: Math.floor(input / dividend),
+    };
+}
+
 class Block {
     constructor(x, y, radius){
         this.x = x;
@@ -352,32 +384,25 @@ class Block {
         this.theta = 0;
         this.phi = 0;
         this.radius = radius;
-        this.colormap = [
-            "rgba(0,0,0,255)",
-            "rgba(200,0,0,255)",
-            "rgba(0,200,0,255)",
-            "rgba(0,0,200,255)",
-            "rgba(250,250,0,255)",
-            "rgba(100,100,100,255)"];
-        this.colorpairs = [
-            [[155,  0,  0],[255,  0,  0]],
-            [[155,103,  0],[255,170,  0]],
-            [[ 13, 49, 132],[37, 94, 235]],
-            [[  0,124,  0],[ 0,204,  0]],];
-        this.allcolors = [
-            [0,  0,  0],[255,  0,  0],
-            [255,170,  0],
-            [37, 94, 235],
-            [ 0,204,  0],];
-        /* this.allcolors = [
-                [155,  0,  0],[255,  0,  0],
-                [155,103,  0],[255,170,  0],
-                [ 13, 49, 132],[37, 94, 235],
-                [  0,124,  0],[ 0,204,  0],];*/
     }
-
-
     move(){
+    }
+    setSort(sort){
+        this.sort = sort;
+        if (this.sort === -1){ return; }
+
+        let step1color = coloring(this.sort, 5);
+        let step2color = coloring(step1color.remains, 4);
+        let step3color = coloring(step2color.remains, 5);
+
+        let index1 = step1color.value;
+        let index2 = step2color.value;
+        let index3 = step3color.value;
+        // let colorpair = this.allcolors[index1];
+        this.drawingType = index3;
+        index2 = index2 < index1 ? index2 : index2 + 1;
+        this.color1 = stringToColor(allColorStrings[index1]);
+        this.color2 = stringToColor(allColorStrings[index2]);           
     }
     draw(){
         let transform = position(this.x, this.y);
@@ -389,22 +414,9 @@ class Block {
             drawVoidRectangle("rgba(255,0,255,255)", transform, this.radius);
         }
         
-        if (this.sort === null){ return; }
-
-        let step1color = this.coloring(this.sort, 5);
-        let step2color = this.coloring(step1color.remains, 4);
-        let step3color = this.coloring(step2color.remains, 5);
-
-        let index1 = step1color.value;
-        let index2 = step2color.value;
-        let index3 = step3color.value;
-        // let colorpair = this.allcolors[index1];
-
-        let color1, color2;
-        index2 = index2 < index1 ? index2 : index2 + 1;
-        color1 = this.colorFromArray(this.allcolors[index1]);
-        color2 = this.colorFromArray(this.allcolors[index2]);   
-
+        let color1 = this.color1;
+        let color2 = this.color2;
+        let index3 = this.drawingType;
         if (index3 === 0) {
             let innertransform1 = position(this.x, this.y);
             drawRectangle(color1, innertransform1, this.radius);
@@ -413,32 +425,21 @@ class Block {
         }
         if (index3 === 1) {
             let innertransform1 = position(this.x, this.y);
-            let innertransform2 = position(this.x, this.y + 2 * this.radius/3);
-            drawRectangle(color2, innertransform1, this.radius, 2 * this.radius/3);
-            drawRectangle(color1, innertransform2, this.radius, 1 * this.radius/3);
+            let innertransform2 = position(this.x + miniMargin * this.radius, this.y + 0.6 * this.radius);
+            drawRectangle(color2, innertransform1, this.radius, this.radius);
+            drawRectangle(color1, innertransform2, this.radius * (1 - 2 * miniMargin), 0.25 * this.radius);
         }
         if (index3 === 2) {
             let innertransform1 = position(this.x, this.y);
-            let innertransform2 = position(this.x +  2 * this.radius/3, this.y);
-            drawRectangle(color2, innertransform1,  2 * this.radius/3, this.radius);
-            drawRectangle(color1, innertransform2, this.radius/3, this.radius);
+            let innertransform2 = position(this.x +  0.6 * this.radius, this.y);
+            drawRectangle(color2, innertransform1, this.radius, this.radius);
+            drawRectangle(color1, innertransform2, 0.25 * this.radius, this.radius);
         }
         if (index3 === 3) {
             drawRectangle(color2, transform, this.radius);
             let innertransform = position(this.x + this.radius/4, this.y + this.radius/4);
             drawRectangle(color1, innertransform, this.radius/2);
         }
-    }
-
-    colorFromArray(colorarray){
-        return "rgba(" + colorarray[0] +  "," + colorarray[1] + "," + + colorarray[2] + ")";
-    }
-
-    coloring(input, dividend){
-        return {
-            value: input % dividend,
-            remains: Math.floor(input / dividend),
-        };
     }
 }
 
@@ -461,28 +462,44 @@ function drawRectangle(color, transform, radius, radius2){
 function init(){
     console.log(Math.cos(360));
     car = new Car();
-   
+    let blocksToAttribute = [];
     for (var j = 0; j <= gridHeight; j++) {
         let row = [];
         for (var i = 0; i <= gridWidth; i++) {
-            let eye = {
+            let block = {
+                i: j,
+                j: i,
                 x: i * gridSize + 10,
                 y: j * gridSize + 10,
                 radius: blockSize,
             };
-            let createdBlock = new Block(eye.x, eye.y, eye.radius);
-            if (Math.random() > 0.5) {createdBlock.bonus = true;}
-            else {createdBlock.bonus = false;}
-            
+            let createdBlock = new Block(block.x, block.y, block.radius);
             // don't worry about i<>j here
             createdBlock.i = j;
             createdBlock.j = i;
-            createdBlock.sort = getRandomInt(0, numberOfSorts - 1);
+            createdBlock.sort = -1;
+            blocksToAttribute.push(createdBlock);
             row[i] = createdBlock;
         }
         map[j] = row;
     }
+    let goOn = true;
+    while(goOn)
+    {
+        let newSort = getRandomInt(0, numberOfSorts - 1);
+        blocksToAttribute[0].setSort(newSort);
+        let rank = getRandomInt(0, blocksToAttribute.length - 1);
+        blocksToAttribute[rank].setSort(newSort);
+        blocksToAttribute = blocksToAttribute.filter(b => b.sort === -1);
+        goOn = blocksToAttribute.length >= 2;
+    }
+        
+
+            
+            
 }
+
+
 function animate(){
     requestAnimationFrame(animate);
     canvasdraw.fillStyle = "rgba(255, 255, 255, 0.75)";
