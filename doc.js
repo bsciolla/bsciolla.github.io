@@ -346,6 +346,37 @@ class Car {
     }
 }
 
+let colorAssociations = [[]];
+
+let allColorStrings = 
+    ["B", "R", "O", "U", "G"];
+let allColorsRgb = [
+    [0, 0, 0],
+    [255, 0, 0],
+    [255, 170, 0],
+    [37, 94, 255],
+    [0, 204, 0],];
+
+function stringToColor(color){
+    let index = allColorStrings.indexOf(color);
+    if (index >= 0){
+        return colorFromArray(allColorsRgb[index]);
+    }
+
+    return null;
+}
+
+function colorFromArray(colorarray){
+    return "rgba(" + colorarray[0] +  "," + colorarray[1] + "," + + colorarray[2] + ")";
+}
+
+function coloring(input, dividend){
+    return {
+        value: input % dividend,
+        remains: Math.floor(input / dividend),
+    };
+}
+
 class Block {
     constructor(x, y, radius){
         this.x = x;
@@ -353,32 +384,25 @@ class Block {
         this.theta = 0;
         this.phi = 0;
         this.radius = radius;
-        this.colormap = [
-            "rgba(0,0,0,255)",
-            "rgba(200,0,0,255)",
-            "rgba(0,200,0,255)",
-            "rgba(0,0,200,255)",
-            "rgba(250,250,0,255)",
-            "rgba(100,100,100,255)"];
-        this.colorpairs = [
-            [[155,  0,  0],[255,  0,  0]],
-            [[155,103,  0],[255,170,  0]],
-            [[ 13, 49, 132],[37, 94, 235]],
-            [[  0,124,  0],[ 0,204,  0]],];
-        this.allcolors = [
-            [0,  0,  0],[255,  0,  0],
-            [255,170,  0],
-            [37, 94, 235],
-            [ 0,204,  0],];
-        /* this.allcolors = [
-                [155,  0,  0],[255,  0,  0],
-                [155,103,  0],[255,170,  0],
-                [ 13, 49, 132],[37, 94, 235],
-                [  0,124,  0],[ 0,204,  0],];*/
     }
-
-
     move(){
+    }
+    setSort(sort){
+        this.sort = sort;
+        if (this.sort === -1){ return; }
+
+        let step1color = coloring(this.sort, 5);
+        let step2color = coloring(step1color.remains, 4);
+        let step3color = coloring(step2color.remains, 5);
+
+        let index1 = step1color.value;
+        let index2 = step2color.value;
+        let index3 = step3color.value;
+        // let colorpair = this.allcolors[index1];
+        this.drawingType = index3;
+        index2 = index2 < index1 ? index2 : index2 + 1;
+        this.color1 = stringToColor(allColorStrings[index1]);
+        this.color2 = stringToColor(allColorStrings[index2]);           
     }
     draw(){
         let transform = position(this.x, this.y);
@@ -390,22 +414,9 @@ class Block {
             drawVoidRectangle("rgba(255,0,255,255)", transform, this.radius);
         }
         
-        if (this.sort === -1){ return; }
-
-        let step1color = this.coloring(this.sort, 5);
-        let step2color = this.coloring(step1color.remains, 4);
-        let step3color = this.coloring(step2color.remains, 5);
-
-        let index1 = step1color.value;
-        let index2 = step2color.value;
-        let index3 = step3color.value;
-        // let colorpair = this.allcolors[index1];
-
-        let color1, color2;
-        index2 = index2 < index1 ? index2 : index2 + 1;
-        color1 = this.colorFromArray(this.allcolors[index1]);
-        color2 = this.colorFromArray(this.allcolors[index2]);   
-
+        let color1 = this.color1;
+        let color2 = this.color2;
+        let index3 = this.drawingType;
         if (index3 === 0) {
             let innertransform1 = position(this.x, this.y);
             drawRectangle(color1, innertransform1, this.radius);
@@ -429,17 +440,6 @@ class Block {
             let innertransform = position(this.x + this.radius/4, this.y + this.radius/4);
             drawRectangle(color1, innertransform, this.radius/2);
         }
-    }
-
-    colorFromArray(colorarray){
-        return "rgba(" + colorarray[0] +  "," + colorarray[1] + "," + + colorarray[2] + ")";
-    }
-
-    coloring(input, dividend){
-        return {
-            value: input % dividend,
-            remains: Math.floor(input / dividend),
-        };
     }
 }
 
@@ -487,9 +487,9 @@ function init(){
     while(goOn)
     {
         let newSort = getRandomInt(0, numberOfSorts - 1);
-        blocksToAttribute[0].sort = newSort;
+        blocksToAttribute[0].setSort(newSort);
         let rank = getRandomInt(0, blocksToAttribute.length - 1);
-        blocksToAttribute[rank].sort = newSort;
+        blocksToAttribute[rank].setSort(newSort);
         blocksToAttribute = blocksToAttribute.filter(b => b.sort === -1);
         goOn = blocksToAttribute.length >= 2;
     }
