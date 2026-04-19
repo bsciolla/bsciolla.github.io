@@ -3,11 +3,95 @@
     padding: 0;
     box-sizing: border-box;
 }
-#canvas1 {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: blue;
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem;
+    color: #333;
+    background: #fff;
+}
+header {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #333;
+}
+header h1 {
+    margin-bottom: 0.5rem;
+    font-size: 1.8rem;
+}
+header h1 a {
+    text-decoration: none;
+    color: #333;
+}
+nav {
+    margin-top: 0.5rem;
+}
+nav a {
+    margin-right: 1.5rem;
+    color: #666;
+    text-decoration: none;
+    font-weight: 500;
+}
+nav a:hover {
+    color: #000;
+}
+main {
+    margin-bottom: 2rem;
+}
+footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid #ddd;
+    color: #666;
+    font-size: 0.9rem;
+}
+a {
+    color: #0066cc;
+}
+a:hover {
+    text-decoration: underline;
+}
+h1, h2, h3 {
+    margin: 1.5rem 0 1rem;
+    line-height: 1.3;
+}
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.2rem; }
+p {
+    margin-bottom: 1rem;
+}
+ul, ol {
+    margin: 1rem 0;
+    padding-left: 2rem;
+}
+li {
+    margin-bottom: 0.5rem;
+}
+article {
+    margin-bottom: 2rem;
+}
+time {
+    color: #666;
+    font-size: 0.9rem;
+}
+.post-preview {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eee;
+}
+.post-preview h3 {
+    margin: 0 0 0.25rem;
+}
+.post-preview a {
+    text-decoration: none;
+    color: #333;
+}
+.post-preview a:hover {
+    color: #0066cc;
+}
+strong {
+    font-weight: 600;
 }
