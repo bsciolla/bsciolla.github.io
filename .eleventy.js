@@ -1,6 +1,9 @@
 const { DateTime } = require("luxon");
 
 module.exports = function(eleventyConfig) {
+  // Ignore README.md - don't process it as a template
+  eleventyConfig.ignores.add("README.md");
+
   // Copy static files
   eleventyConfig.addPassthroughCopy("demo.html");
   eleventyConfig.addPassthroughCopy("index.css");
