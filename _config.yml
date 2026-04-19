@@ -1,6 +1,6 @@
 title: Nom de ton site
-description: Une petite description
-theme: jekyll-theme-minimal   # ou le nom du thème que tu as choisi
+description: A blog about science, society, the universe and all that's in it, in english and in french
+remote_theme: mmistakes/minimal-mistakes-jekyll
 
 # Pour un blog
 show_excerpts: true
