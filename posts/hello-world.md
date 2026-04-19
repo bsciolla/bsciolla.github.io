@@ -1,6 +1,6 @@
 ---
 title: "Mon premier article"
-date: 2026-04-19 10:00:00 +0200
+date: "2026-04-19 10:00:00 +0200"
 categories: [blog, tech]
 tags: [github, jekyll, post]
 layout: post.njk
