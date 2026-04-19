@@ -1,0 +1,33 @@
+---
+title: Accueil
+layout: base.njk
+---
+
+<h1>Bienvenue sur mon site</h1>
+
+<p>Ceci est la page d'accueil.</p>
+
+<p>Vous pouvez écrire tout votre contenu ici en <strong>Markdown</strong>.</p>
+
+<h2>Section exemple</h2>
+
+<ul>
+  <li>Liste 1</li>
+  <li>Liste 2</li>
+  <li>Liste 3</li>
+</ul>
+
+<p>Ajoutez des images, des liens, du code, etc.</p>
+
+<h2>Game</h2>
+<p><a href="/demo.html">Matching game</a> Don't bother it's for my own use only.</p>
+
+{% if collections.posts.length > 0 %}
+<h2>Recent Posts</h2>
+{% for post in collections.posts | limit(3) %}
+  <article class="post-preview">
+    <h3><a href="{{ post.url }}">{{ post.data.title }}</a></h3>
+    <time datetime="{{ post.date | dateDisplay }}">{{ post.date | dateDisplay }}</time>
+  </article>
+{% endfor %}
+{% endif %}
