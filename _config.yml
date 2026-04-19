@@ -2,5 +2,12 @@ title: Bruno's website
 description: A blog about science, society, the universe and all that's in it, in english and in french
 remote_theme: mmistakes/minimal-mistakes
 
-# Pour un blog
-show_excerpts: true
+plugins:
+  - jekyll-include-cache     # ← This is the important line
+  - jekyll-paginate
+  - jekyll-sitemap
+  - jekyll-feed
+  # you can add more later if needed
+
+# Optional nice settings for a clean look
+minimal_mistakes_skin: "default"   # try "mint", "dark", "contrast", "air", "neon" etc.
