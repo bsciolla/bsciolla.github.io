@@ -1,0 +1,103 @@
+/* Basic Flat & Clean Styling for Eleventy */
+
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  
+  --color-bg: #ffffff;
+  --color-text: #222222;
+  --color-accent: #0066ff;     /* nice subtle blue - change as you like */
+  --color-border: #e5e5e5;
+  --color-muted: #666666;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0f0f0f;
+    --color-text: #eeeeee;
+    --color-accent: #4488ff;
+    --color-border: #333333;
+    --color-muted: #aaaaaa;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.7;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+header, main, footer {
+  margin-bottom: 3rem;
+}
+
+h1, h2, h3 {
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: 2.5rem;
+  margin-bottom: 1rem;
+}
+
+h1 { font-size: 2.4rem; }
+h2 { font-size: 1.8rem; }
+h3 { font-size: 1.4rem; }
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+p, ul, ol {
+  margin-bottom: 1.5rem;
+}
+
+pre, code {
+  font-family: var(--font-mono);
+  background: var(--color-border);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+}
+
+pre {
+  padding: 1rem;
+  overflow-x: auto;
+  border-radius: 6px;
+}
+
+nav ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+nav a {
+  font-weight: 500;
+}
+
+/* Simple card-like posts if you list articles */
+.post-list article {
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.post-list article:first-child {
+  border-top: none;
+}
+
+/* Make it breathe */
+@media (max-width: 600px) {
+  body {
+    padding: 1.5rem 1rem;
+  }
+}

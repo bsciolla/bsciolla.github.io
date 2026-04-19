@@ -6,7 +6,7 @@ module.exports = function(eleventyConfig) {
 
   // Copy static files
   eleventyConfig.addPassthroughCopy("demo.html");
-  eleventyConfig.addPassthroughCopy("index.css");
+  // CSS is included via Nunjucks, no need to passthrough
   eleventyConfig.addPassthroughCopy("doc.js");
 
   // Date filter
