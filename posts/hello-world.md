@@ -1,12 +1,10 @@
 ---
-title: "Mon premier article"
+title: "Mécanique quantique - introduction"
 date: 2026-04-19T10:00:00+02:00
-categories: [blog, tech]
-tags: [github, jekyll, post]
+categories: [physics, quantum mechanics]
+tags: [github, post]
 layout: post.njk
 ---
-
-Ici tu écris ton article en **Markdown** :
 
 # Titre de section
 Du texte normal, **gras**, *italique*, listes, etc.
