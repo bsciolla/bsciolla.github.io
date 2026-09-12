@@ -18,7 +18,10 @@
             <input type="number" value="20" id="blockDamageInput" oninput="updateBlockDamage()"></input>
             <label for="animationDurationFactorInput">Animation duration %</label>
             <input type="number" value="100" id="animationDurationFactorInput" oninput="updateAnimationDurationFactor()"></input>
+            <label for="scenarioSelect">Scenario</label>
+            <select id="scenarioSelect" onchange="updateScenario()"></select>
         </div>
+        <div id="congratsMessage" onclick="this.style.display='none'" style="display:none; cursor: pointer; position: fixed; top: 50%; left: 0; right: 0; transform: translateY(-50%); background: white; color: green; font-weight: bold; font-size: 3em; text-align: center; padding: 20px 0; z-index: 1000; box-shadow: 0 0 20px rgba(0,0,0,0.3);"></div>
         <div>
             <canvas id="canvas1">game</canvas>
         </div>
