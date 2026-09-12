@@ -3,7 +3,12 @@ const canvasdraw = canvas.getContext("2d");
 
 
 let map = [];
-let car = undefined;
+let cars = [];
+let effects = [];
+let paused = false;
+let targetFps = 60;
+let frameInterval = 1000 / targetFps;
+let lastFrameTime = 0;
 let theta;
 let score = 0;
 let height = 20;
@@ -270,6 +275,12 @@ function match(block1, block2, turns){
         return;
     }
 
+    effects.push(new RingEffect(block1.x + block1.radius / 2, block1.y + block1.radius / 2, block1.color1));
+    effects.push(new RingEffect(block2.x + block2.radius / 2, block2.y + block2.radius / 2, block2.color1));
+
+    applyBlockRemovalDamage(block1);
+    applyBlockRemovalDamage(block2);
+
     block1.removed = true;
     block2.removed = true;
     block1.selected = null;
@@ -277,8 +288,85 @@ function match(block1, block2, turns){
     previousSelectedBlock = null;
 }
 
+function blockHitDamage(distance){
+    let minDistance = 2 * gridSize;
+    let maxDistance = 6 * gridSize;
+    let maxDamage = 20;
+
+    if (distance <= minDistance) { return maxDamage; }
+    if (distance >= maxDistance) { return 0; }
+    return maxDamage * (maxDistance - distance) / (maxDistance - minDistance);
+}
+
+function applyBlockRemovalDamage(block){
+    let centerX = block.x + block.radius / 2;
+    let centerY = block.y + block.radius / 2;
+
+    for (var c of cars){
+        let dx = c.x - centerX;
+        let dy = c.y - centerY;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        let damage = blockHitDamage(distance);
+        if (damage > 0){
+            c.loseHealth(damage);
+            c.onHit();
+        }
+    }
+}
+
+function rgbaWithAlpha(colorString, alpha){
+    let match = /rgba?\(([^)]+)\)/.exec(colorString);
+    if (!match) { return "rgba(0,0,0," + alpha + ")"; }
+    let parts = match[1].split(",").map(s => s.trim());
+    return "rgba(" + parts[0] + "," + parts[1] + "," + parts[2] + "," + alpha + ")";
+}
+
+function blendColor(baseColorString, targetRgb, factor){
+    let match = /rgba?\(([^)]+)\)/.exec(baseColorString);
+    let base = match
+        ? match[1].split(",").map(s => parseFloat(s.trim()))
+        : [0, 0, 0];
+
+    let r = Math.round(base[0] + (targetRgb[0] - base[0]) * factor);
+    let g = Math.round(base[1] + (targetRgb[1] - base[1]) * factor);
+    let b = Math.round(base[2] + (targetRgb[2] - base[2]) * factor);
+    return "rgba(" + r + "," + g + "," + b + ",255)";
+}
+
+class RingEffect {
+    constructor(x, y, color){
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.done = false;
+        this.progress = { t: 0 };
+        gsap.to(this.progress, {
+            t: 1,
+            duration: 0.6,
+            ease: "power2.out",
+            onComplete: () => { this.done = true; },
+        });
+    }
+    draw(){
+        this.drawRing(0, 40, 6);
+        this.drawRing(0.15, 55, 4);
+    }
+    drawRing(delay, maxRadius, maxLineWidth){
+        let localT = (this.progress.t - delay) / (1 - delay);
+        if (localT <= 0) { return; }
+        localT = Math.min(1, localT);
+
+        let transform = position(this.x, this.y);
+        canvasdraw.beginPath();
+        canvasdraw.arc(transform.x, transform.y, localT * maxRadius, 0, Math.PI * 2);
+        canvasdraw.lineWidth = maxLineWidth * (1 - localT * 0.5);
+        canvasdraw.strokeStyle = rgbaWithAlpha(this.color, 1 - localT);
+        canvasdraw.stroke();
+    }
+}
+
 function turnCar(orientation) {
-    car.angle += orientation * 0.1;
+    cars[0].angle += orientation * 0.1;
 }
 
 function position(x, y) {
@@ -311,13 +399,31 @@ window.onkeydown = function (event) {
    };
 
 class Car {
-    constructor(x, y){
-        this.x = 400;
-        this.y = 400;
+    constructor(x, y, color){
+        this.x = x;
+        this.y = y;
         this.vy = 1;
         this.vx = 0;
         this.speed = 2;
         this.angle = Math.PI/2.0;
+        this.color = color;
+        this.health = 100;
+        this.bounceScale = 1;
+        this.colorShift = 0;
+        this.nurtureColor = [255, 205, 80];
+    }
+    loseHealth(amount){
+        this.health = Math.max(0, this.health - amount);
+    }
+    get sizeMultiplier(){
+        return 2 - this.health / 100;
+    }
+    onHit(){
+        this.bounceScale = 1.4;
+        gsap.to(this, { bounceScale: 1, duration: 0.5, ease: "elastic.out(1, 0.4)" });
+
+        this.colorShift = 1;
+        gsap.to(this, { colorShift: 0, duration: 0.4, ease: "power2.out" });
     }
     move(){
         this.angle = this.angle + (Math.random() - 0.5) * 0.1;
@@ -340,9 +446,12 @@ class Car {
         let transform = position(this.x, this.y);
         let transform2 = position(this.x + 15 * Math.cos(this.angle)
             , this.y + 15 * Math.sin(this.angle));
-        let color = "rgba(120,40,155,255)";
-        drawRectangle(color, transform, 30);
-        drawRectangle(color, transform2, 25);
+        let scale = this.sizeMultiplier * this.bounceScale;
+        let bodyColor = this.colorShift > 0
+            ? blendColor(this.color, this.nurtureColor, this.colorShift)
+            : this.color;
+        drawRectangle(bodyColor, transform, 30 * scale);
+        drawRectangle("rgba(0,0,0,255)", transform2, 25 * scale);
     }
 }
 
@@ -461,7 +570,11 @@ function drawRectangle(color, transform, radius, radius2){
 
 function init(){
     console.log(Math.cos(360));
-    car = new Car();
+    cars = [
+        new Car(300, 300, "rgba(120,40,155,255)"),
+        new Car(500, 500, "rgba(255,140,0,255)"),
+    ];
+    effects = [];
     let blocksToAttribute = [];
     for (var j = 0; j <= gridHeight; j++) {
         let row = [];
@@ -500,8 +613,17 @@ function init(){
 }
 
 
-function animate(){
+function animate(timestamp){
+    if (paused){ return; }
     requestAnimationFrame(animate);
+
+    timestamp = timestamp || 0;
+    let elapsed = timestamp - lastFrameTime;
+    if (elapsed < frameInterval){
+        return;
+    }
+    lastFrameTime = timestamp - (elapsed % frameInterval);
+
     canvasdraw.fillStyle = "rgba(255, 255, 255, 0.75)";
     canvasdraw.fillRect(0, 0, canvas.width, canvas.height);
     for (var j = 0; j <= gridHeight; j++) {
@@ -510,8 +632,14 @@ function animate(){
             map[j][i].draw();           
         }
     }
-    car.move();
-    car.draw();
+    for (var c of cars){
+        c.move();
+        c.draw();
+    }
+    for (var e of effects){
+        e.draw();
+    }
+    effects = effects.filter(e => !e.done);
 }
 init();
 animate();
@@ -519,6 +647,17 @@ animate();
 function reloadMap(){
     numberOfSorts = parseInt(document.getElementById("numberOfSortsInput").value);
     init();
+}
+
+function togglePause(){
+    paused = !paused;
+    document.getElementById("pauseButton").textContent = paused ? "Resume" : "Pause";
+    if (paused){
+        gsap.globalTimeline.pause();
+    } else {
+        gsap.globalTimeline.resume();
+        animate();
+    }
 }
 
 window.addEventListener("resize", function(){
