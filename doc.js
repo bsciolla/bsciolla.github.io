@@ -18,8 +18,8 @@ let originx = 0;
 let originy = 0;
 let previousSelectedBlock = null;
 let selectionIndex = 0;
-let numberOfSorts = 26;
-let blockDamage = 20;
+let numberOfSorts = 16;
+let blockDamage = 40;
 let animationDurationFactor = 100;
 
 function scaledDuration(duration){
@@ -38,8 +38,10 @@ let tokenSpawnChance = 0.05;
 let tokenLifespanRemovals = 4;
 let tokenTypes = ["damageUp", "damageDown", "starEatToggle"];
 let damageTokenCounter = 0;
-let starsEatable = true;
+let starsEatable = false;
 let activeTokenBlocks = [];
+let randomMode = false;
+let randomModeStuck = false;
 let gridWidth = 18;
 let gridHeight = 18;
 let matchingDistance = Math.max(gridWidth, gridHeight);
@@ -60,6 +62,19 @@ const camera = {
 
 function getRandomFloat(min, max) {
     return Math.random() * (max - min) + min;
+}
+
+function wrapPosition(entity){
+    if (entity.x > canvas.width){
+        entity.x = 0;
+    } else if (entity.x < 0){
+        entity.x = canvas.width;
+    }
+    if (entity.y > canvas.height){
+        entity.y = 0;
+    } else if (entity.y < 0){
+        entity.y = canvas.height;
+    }
 }
 
 function getRandomInt(min, max) {
@@ -197,7 +212,8 @@ function followALineMatchX(block1, block2, factor){
 
         if (sourceBlock !== block1
             && sourceBlock !== block2
-            && !sourceBlock.removed){
+            && !sourceBlock.removed
+            && !sourceBlock.token){
             return false;
         }
         possible = squareMatch(sourceBlock, block2);
@@ -223,7 +239,8 @@ function followALineMatchY(block1, block2, factor){
 
         if (sourceBlock !== block1
             && sourceBlock !== block2
-            && !sourceBlock.removed){
+            && !sourceBlock.removed
+            && !sourceBlock.token){
             return false;
         }
         possible = squareMatch(sourceBlock, block2);
@@ -289,7 +306,8 @@ function checkLineX(block1, block2, imini, deltai, j){
         let iblock = map[imini + i][j];
         if (iblock !== block1
          && iblock !== block2
-         && !iblock.removed){
+         && !iblock.removed
+         && !iblock.token){
             possible = false;
         }
     }
@@ -302,7 +320,8 @@ function checkLineY(block1, block2, jmini, deltaj, i){
         let iblock = map[i][jmini + j];
         if (iblock !== block1
          && iblock !== block2
-         && !iblock.removed){
+         && !iblock.removed
+         && !iblock.token){
             possible = false;
         }
     }
@@ -377,8 +396,73 @@ function maybeSpawnTokenFromRemoval(block1, block2){
     spawnTokenAt(target);
 }
 
+function toggleRandomMode(){
+    randomMode = !randomMode;
+    document.getElementById("randomModeButton").textContent = "Random Mode: " + (randomMode ? "On" : "Off");
+}
+
+function isAcceptablePair(block1, block2){
+    if (block1 === null || block2 === null || block1 === block2) { return false; }
+    if (block1.removed || block2.removed) { return false; }
+    if (block1.token || block2.token) { return false; }
+    if (block1.sort === -1 || block1.sort !== block2.sort) { return false; }
+
+    if (squareMatch(block1, block2)) { return true; }
+
+    return followALineMatchX(block1, block2, 1)
+        || followALineMatchX(block1, block2, -1)
+        || followALineMatchY(block1, block2, 1)
+        || followALineMatchY(block1, block2, -1);
+}
+
+function findRandomAcceptablePair(){
+    let candidates = [];
+    for (var j = 0; j <= gridHeight; j++){
+        for (var i = 0; i <= gridWidth; i++){
+            let block = map[j][i];
+            if (!block.removed && !block.token){
+                candidates.push(block);
+            }
+        }
+    }
+    if (candidates.length < 2) { return null; }
+
+    let acceptablePairs = [];
+    for (let a = 0; a < candidates.length; a++){
+        for (let b = a + 1; b < candidates.length; b++){
+            if (isAcceptablePair(candidates[a], candidates[b])){
+                acceptablePairs.push([candidates[a], candidates[b]]);
+            }
+        }
+    }
+    if (acceptablePairs.length === 0) { return null; }
+
+    return acceptablePairs[getRandomInt(0, acceptablePairs.length - 1)];
+}
+
+function hasPendingAnimation(){
+    for (var e of effects){
+        if (e instanceof Star) { continue; }
+        if (!e.done) { return true; }
+    }
+    return false;
+}
+
+function performRandomMove(){
+    let pair = findRandomAcceptablePair();
+    if (!pair) {
+        randomModeStuck = true;
+        return;
+    }
+
+    tryFlipBlock(pair[0].i, pair[0].j);
+    if (pair[0].removed || pair[1].removed) { return; }
+    tryFlipBlock(pair[1].i, pair[1].j);
+}
+
 function triggerCarMovementBurst(){
     for (var c of cars){
+        c.turnCount += 1;
         gsap.killTweensOf(c, "speedFactor");
         c.speedFactor = 1;
         gsap.to(c, { speedFactor: 0, duration: scaledDuration(3), ease: "power2.out" });
@@ -390,6 +474,8 @@ function match(block1, block2, turns){
     {
         return;
     }
+
+    randomModeStuck = false;
 
     effects.push(new RingEffect(block1.x + block1.radius / 2, block1.y + block1.radius / 2, block1.color1));
     effects.push(new RingEffect(block2.x + block2.radius / 2, block2.y + block2.radius / 2, block2.color1));
@@ -441,7 +527,7 @@ function blockHitDamage(distance){
 }
 
 function starHitDamage(distance){
-    return computeHitDamage(distance, 1.5 * gridSize, 4.5 * gridSize);
+    return computeHitDamage(distance, 2 * gridSize, 6 * gridSize);
 }
 
 function applyBlockRemovalDamage(block, newCars, newStars){
@@ -484,7 +570,7 @@ function applyStarDamage(block, newStars){
         let damage = starHitDamage(distance);
         if (damage > 0){
             e.loseHealth(damage);
-            if (e.health < 50){
+            for (let regenCount = 0; regenCount < 4 && e.health < 50; regenCount++){
                 e.regen();
             }
         }
@@ -542,6 +628,7 @@ function spawnNearbyBlock(x, y, rangeInGrid){
 
     chosen.setSort(getRandomInt(0, numberOfSorts - 1));
     chosen.removed = false;
+    randomModeStuck = false;
 
     playBlockSpawnAnimation(chosen);
 }
@@ -579,7 +666,7 @@ function applyStarMovement(block, newStars){
     let centerX = block.x + block.radius / 2;
     let centerY = block.y + block.radius / 2;
     let range = 5 * gridSize;
-    let crowdRange = starBlockCreationRange * gridSize;
+    let crowdRange = 2 * gridSize;
 
     for (var e of effects){
         if (!(e instanceof Star)) { continue; }
@@ -602,7 +689,14 @@ function applyStarMovement(block, newStars){
         let targetX = e.x + amount * Math.cos(angle);
         let targetY = e.y + amount * Math.sin(angle);
         gsap.killTweensOf(e, "x,y");
-        gsap.to(e, { x: targetX, y: targetY, duration: scaledDuration(hitAnimationDuration), ease: "power2.out" });
+        let star = e;
+        gsap.to(e, {
+            x: targetX,
+            y: targetY,
+            duration: scaledDuration(hitAnimationDuration),
+            ease: "power2.out",
+            onUpdate: () => wrapPosition(star),
+        });
     }
 }
 
@@ -740,7 +834,7 @@ class Star {
         return 2 - this.health / 100;
     }
     regen(){
-        this.health = Math.min(100, this.health + 20);
+        this.health = Math.min(100, this.health + 15);
         spawnNearbyBlock(this.x, this.y, starBlockCreationRange);
     }
     draw(){
@@ -807,6 +901,7 @@ class Car {
         this.colorShift = 0;
         this.nurtureColor = [255, 205, 80];
         this.speedFactor = 0;
+        this.turnCount = 0;
     }
     loseHealth(amount){
         this.health = Math.max(0, this.health - amount);
@@ -831,16 +926,7 @@ class Car {
         this.vy = this.speed * Math.sin(this.angle) * this.speedFactor;
         this.x += this.vx;
         this.y += this.vy;
-        if (this.x > canvas.width){
-            this.x = 0;
-        } else if (this.x < 0){
-            this.x = canvas.width;
-        }
-        if (this.y > canvas.height){
-            this.y = 0;
-        } else if (this.y < 0){
-            this.y = canvas.height;
-        }
+        wrapPosition(this);
     }
     draw(){
         let scale = this.sizeMultiplier * this.bounceScale;
@@ -952,10 +1038,8 @@ class Block {
         }
 
         if (this.token){
-            let glowPhase = (performance.now() / 4000) % 1;
-            let glowBlend = (Math.sin(glowPhase * 2 * Math.PI) + 1) / 2;
-            let glowColor = blendColor("rgba(255,215,0,255)", [255, 140, 0], glowBlend);
-            drawRoundedRect(glowColor, transform, this.radius, this.radius * 0.3);
+            let swapped = Math.floor(performance.now() / 500) % 2 === 1;
+            drawCheckerboard(transform, this.radius, this.radius * 0.3, swapped);
             let coreTransform = position(this.x + this.radius / 4, this.y + this.radius / 4);
             drawRectangle(tokenCoreColor(this.token), coreTransform, this.radius / 2);
             canvasdraw.restore();
@@ -1007,11 +1091,7 @@ function drawRectangle(color, transform, radius, radius2){
     canvasdraw.fillRect(transform.x, transform.y, radius, radius2);
 }
 
-function drawRoundedRect(color, transform, size, cornerRadius){
-    let x = transform.x;
-    let y = transform.y;
-    let r = cornerRadius;
-
+function traceRoundedRectPath(x, y, size, r){
     canvasdraw.beginPath();
     canvasdraw.moveTo(x + r, y);
     canvasdraw.lineTo(x + size - r, y);
@@ -1023,8 +1103,36 @@ function drawRoundedRect(color, transform, size, cornerRadius){
     canvasdraw.lineTo(x, y + r);
     canvasdraw.arcTo(x, y, x + r, y, r);
     canvasdraw.closePath();
+}
+
+function drawRoundedRect(color, transform, size, cornerRadius){
+    traceRoundedRectPath(transform.x, transform.y, size, cornerRadius);
     canvasdraw.fillStyle = color;
     canvasdraw.fill();
+}
+
+function drawCheckerboard(transform, size, cornerRadius, swapped){
+    let x = transform.x;
+    let y = transform.y;
+    let cellCount = 4;
+    let cellSize = size / cellCount;
+    let colorA = "rgba(255,215,0,255)";
+    let colorB = "rgba(255,140,0,255)";
+
+    canvasdraw.save();
+    traceRoundedRectPath(x, y, size, cornerRadius);
+    canvasdraw.clip();
+
+    for (let row = 0; row < cellCount; row++){
+        for (let col = 0; col < cellCount; col++){
+            let isEven = (row + col) % 2 === 0;
+            let useColorA = swapped ? !isEven : isEven;
+            canvasdraw.fillStyle = useColorA ? colorA : colorB;
+            canvasdraw.fillRect(x + col * cellSize, y + row * cellSize, cellSize, cellSize);
+        }
+    }
+
+    canvasdraw.restore();
 }
 
 
@@ -1103,7 +1211,8 @@ function init(){
     effects = [];
     activeTokenBlocks = [];
     damageTokenCounter = 0;
-    starsEatable = true;
+    starsEatable = false;
+    randomModeStuck = false;
     let blocksToAttribute = [];
     for (var j = 0; j <= gridHeight; j++) {
         let row = [];
@@ -1140,6 +1249,8 @@ function handleCarEatingStars(){
     if (!starsEatable) { return; }
 
     for (var c of cars){
+        if (c.turnCount < 3) { continue; }
+
         for (var e of effects){
             if (!(e instanceof Star) || e.done) { continue; }
 
@@ -1188,6 +1299,10 @@ function animate(timestamp){
         e.draw();
     }
     effects = effects.filter(e => !e.done);
+
+    if (randomMode && !randomModeStuck && !hasPendingAnimation()){
+        performRandomMove();
+    }
 }
 init();
 animate();

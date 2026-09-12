@@ -11,11 +11,12 @@
     <body>
         <div>
             <h1>Bruno's pastime</h1>
-            <input type="number" value="26" id="numberOfSortsInput"></input>
+            <input type="number" value="16" id="numberOfSortsInput"></input>
             <button onclick="reloadMap()">Reload</button>
             <button onclick="togglePause()" id="pauseButton">Pause</button>
+            <button onclick="toggleRandomMode()" id="randomModeButton">Random Mode: Off</button>
             <label for="blockDamageInput">Block damage</label>
-            <input type="number" value="20" id="blockDamageInput" oninput="updateBlockDamage()"></input>
+            <input type="number" value="40" id="blockDamageInput" oninput="updateBlockDamage()"></input>
             <label for="animationDurationFactorInput">Animation duration %</label>
             <input type="number" value="100" id="animationDurationFactorInput" oninput="updateAnimationDurationFactor()"></input>
             <label for="scenarioSelect">Scenario</label>
