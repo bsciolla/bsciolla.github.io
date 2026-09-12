@@ -19,6 +19,19 @@ let originy = 0;
 let previousSelectedBlock = null;
 let selectionIndex = 0;
 let numberOfSorts = 26;
+let blockDamage = 20;
+let animationDurationFactor = 100;
+
+function scaledDuration(duration){
+    return duration * animationDurationFactor / 100;
+}
+let hitAnimationDuration = 1.5;
+let maxCars = 8;
+let maxStars = 8;
+let pendingCarSpawns = 0;
+let carDefaultSpeed = 2 * 0.75;
+let carMinSpeed = 1 * 0.75;
+let carMaxSpeed = 3 * 0.75;
 let gridWidth = 18;
 let gridHeight = 18;
 let matchingDistance = Math.max(gridWidth, gridHeight);
@@ -35,6 +48,10 @@ const camera = {
     x: 0,
     y: 0,
     theta: 0.,
+}
+
+function getRandomFloat(min, max) {
+    return Math.random() * (max - min) + min;
 }
 
 function getRandomInt(min, max) {
@@ -64,19 +81,32 @@ function blockClick(x, y){
 }
 
 function tryFlipBlock(i, j){
+    let point;
     try{
-        let point = map[i][j];
+        point = map[i][j];
     }
-    catch{ return; }
-    if (map[i][j] !== undefined){
-        let linked = relateElements(previousSelectedBlock, map[i][j]);
-        if (!linked) {
-            linked = relateToNearbyElement(i, j);    
-        }
-        if (!linked){
-            selectElement(map[i][j]);
-        }
+    catch{
+        unselectBlock();
+        return;
     }
+    if (point === undefined || point.removed === true){
+        unselectBlock();
+        return;
+    }
+    let linked = relateElements(previousSelectedBlock, point);
+    if (!linked) {
+        linked = relateToNearbyElement(i, j);
+    }
+    if (!linked){
+        selectElement(point);
+    }
+}
+
+function unselectBlock(){
+    if (previousSelectedBlock !== null){
+        previousSelectedBlock.selected = null;
+    }
+    previousSelectedBlock = null;
 }
 
 function selectElement(block) {
@@ -278,8 +308,17 @@ function match(block1, block2, turns){
     effects.push(new RingEffect(block1.x + block1.radius / 2, block1.y + block1.radius / 2, block1.color1));
     effects.push(new RingEffect(block2.x + block2.radius / 2, block2.y + block2.radius / 2, block2.color1));
 
-    applyBlockRemovalDamage(block1);
-    applyBlockRemovalDamage(block2);
+    let newCars = [];
+    let newStars = [];
+
+    applyBlockRemovalDamage(block1, newCars, newStars);
+    applyBlockRemovalDamage(block2, newCars, newStars);
+
+    applyStarDamage(block1, newStars);
+    applyStarDamage(block2, newStars);
+
+    applyStarMovement(block1, newStars);
+    applyStarMovement(block2, newStars);
 
     block1.removed = true;
     block2.removed = true;
@@ -291,26 +330,177 @@ function match(block1, block2, turns){
 function blockHitDamage(distance){
     let minDistance = 2 * gridSize;
     let maxDistance = 6 * gridSize;
-    let maxDamage = 20;
+    let maxDamage = blockDamage;
 
     if (distance <= minDistance) { return maxDamage; }
     if (distance >= maxDistance) { return 0; }
     return maxDamage * (maxDistance - distance) / (maxDistance - minDistance);
 }
 
-function applyBlockRemovalDamage(block){
+function applyBlockRemovalDamage(block, newCars, newStars){
     let centerX = block.x + block.radius / 2;
     let centerY = block.y + block.radius / 2;
 
+    let deadCars = [];
     for (var c of cars){
+        if (newCars.includes(c)) { continue; }
+
         let dx = c.x - centerX;
         let dy = c.y - centerY;
         let distance = Math.sqrt(dx * dx + dy * dy);
         let damage = blockHitDamage(distance);
         if (damage > 0){
             c.loseHealth(damage);
-            c.onHit();
+            if (c.health <= 0){
+                deadCars.push(c);
+            } else {
+                c.onHit();
+            }
         }
+    }
+    for (var dead of deadCars){
+        respawnCar(dead, newCars, newStars);
+    }
+}
+
+function applyStarDamage(block, newStars){
+    let centerX = block.x + block.radius / 2;
+    let centerY = block.y + block.radius / 2;
+
+    for (var e of effects){
+        if (!(e instanceof Star)) { continue; }
+        if (newStars.includes(e)) { continue; }
+
+        let dx = e.x - centerX;
+        let dy = e.y - centerY;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        let damage = blockHitDamage(distance);
+        if (damage > 0){
+            e.loseHealth(damage);
+            if (e.health < 50){
+                e.regen();
+            }
+        }
+    }
+}
+
+function spawnMissRate(candidate){
+    let neighbors = [
+        { i: candidate.i - 1, j: candidate.j },
+        { i: candidate.i + 1, j: candidate.j },
+        { i: candidate.i, j: candidate.j - 1 },
+        { i: candidate.i, j: candidate.j + 1 },
+    ];
+
+    let fullCount = 0;
+    for (var n of neighbors){
+        let neighborBlock = null;
+        if (n.i >= 0 && n.i <= gridHeight && n.j >= 0 && n.j <= gridWidth){
+            neighborBlock = map[n.i][n.j];
+        }
+        let isFull = neighborBlock === null || neighborBlock === undefined || neighborBlock.removed !== true;
+        if (isFull){
+            fullCount++;
+        }
+    }
+
+    return fullCount / 4;
+}
+
+function spawnNearbyBlock(x, y, rangeInGrid){
+    let range = rangeInGrid * gridSize;
+    let candidates = [];
+
+    for (var j = 0; j <= gridHeight; j++) {
+        for (var i = 0; i <= gridWidth; i++) {
+            let candidate = map[j][i];
+            if (!candidate.removed) { continue; }
+
+            let centerX = candidate.x + candidate.radius / 2;
+            let centerY = candidate.y + candidate.radius / 2;
+            let dx = centerX - x;
+            let dy = centerY - y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < range){
+                candidates.push(candidate);
+            }
+        }
+    }
+
+    if (candidates.length === 0) { return; }
+
+    let chosen = candidates[getRandomInt(0, candidates.length - 1)];
+
+    if (Math.random() < spawnMissRate(chosen)) { return; }
+
+    chosen.setSort(getRandomInt(0, numberOfSorts - 1));
+    chosen.removed = false;
+
+    gsap.killTweensOf(chosen, "spawnScale,spawnAngle,spawnAlpha");
+    chosen.spawnScale = 0;
+    chosen.spawnAngle = 4 * Math.PI;
+    chosen.spawnAlpha = 0;
+    gsap.to(chosen, { spawnScale: 1, duration: scaledDuration(0.8), ease: "power3.out" });
+    gsap.to(chosen, { spawnAngle: 0, duration: scaledDuration(0.8), ease: "power3.out" });
+    gsap.to(chosen, { spawnAlpha: 1, duration: scaledDuration(0.8), ease: "power3.out" });
+}
+
+function applyStarMovement(block, newStars){
+    let centerX = block.x + block.radius / 2;
+    let centerY = block.y + block.radius / 2;
+    let range = 5 * gridSize;
+
+    for (var e of effects){
+        if (!(e instanceof Star)) { continue; }
+        if (newStars.includes(e)) { continue; }
+
+        let dx = centerX - e.x;
+        let dy = centerY - e.y;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance >= range) { continue; }
+
+        let angle = Math.atan2(dy, dx);
+        let amount = Math.random() * gridSize;
+        let targetX = e.x + amount * Math.cos(angle);
+        let targetY = e.y + amount * Math.sin(angle);
+        gsap.killTweensOf(e, "x,y");
+        gsap.to(e, { x: targetX, y: targetY, duration: scaledDuration(hitAnimationDuration), ease: "power2.out" });
+    }
+}
+
+function randomCarColor(){
+    let r = getRandomInt(60, 255);
+    let g = getRandomInt(60, 255);
+    let b = getRandomInt(60, 255);
+    return "rgba(" + r + "," + g + "," + b + ",255)";
+}
+
+function respawnCar(deadCar, newCars, newStars){
+    let index = cars.indexOf(deadCar);
+    if (index === -1) { return; }
+    cars.splice(index, 1);
+
+    let starCount = effects.filter(e => e instanceof Star).length;
+    if (starCount < maxStars){
+        let star = new Star(deadCar.x, deadCar.y);
+        effects.push(star);
+        newStars.push(star);
+    }
+
+    let desiredSpawns = 2 + pendingCarSpawns;
+    let availableSlots = Math.max(1, maxCars - cars.length);
+    let actualSpawns = Math.min(desiredSpawns, availableSlots);
+    pendingCarSpawns = desiredSpawns - actualSpawns;
+
+    for (var k = 0; k < actualSpawns; k++){
+        let shiftAngle = Math.random() * Math.PI * 2;
+        let newX = deadCar.x + gridSize * Math.cos(shiftAngle);
+        let newY = deadCar.y + gridSize * Math.sin(shiftAngle);
+        let newCar = new Car(newX, newY, randomCarColor());
+        newCar.speed = getRandomFloat(carMinSpeed, carMaxSpeed);
+        newCar.angle = Math.random() * Math.PI * 2;
+        cars.push(newCar);
+        newCars.push(newCar);
     }
 }
 
@@ -342,14 +532,14 @@ class RingEffect {
         this.progress = { t: 0 };
         gsap.to(this.progress, {
             t: 1,
-            duration: 0.6,
+            duration: scaledDuration(0.6),
             ease: "power2.out",
             onComplete: () => { this.done = true; },
         });
     }
     draw(){
-        this.drawRing(0, 40, 6);
-        this.drawRing(0.15, 55, 4);
+        this.drawRing(0, 40, 14);
+        this.drawRing(0.15, 55, 10);
     }
     drawRing(delay, maxRadius, maxLineWidth){
         let localT = (this.progress.t - delay) / (1 - delay);
@@ -362,6 +552,42 @@ class RingEffect {
         canvasdraw.lineWidth = maxLineWidth * (1 - localT * 0.5);
         canvasdraw.strokeStyle = rgbaWithAlpha(this.color, 1 - localT);
         canvasdraw.stroke();
+    }
+}
+
+class Star {
+    constructor(x, y, color){
+        this.x = x;
+        this.y = y;
+        this.color = color || "rgba(255,215,0,255)";
+        this.done = false;
+        this.health = 100;
+        this.lowHealthColor = [255, 69, 0];
+    }
+    loseHealth(amount){
+        this.health = Math.max(0, this.health - amount);
+    }
+    get sizeMultiplier(){
+        return 2 - this.health / 100;
+    }
+    regen(){
+        this.health = Math.min(100, this.health + 20);
+        spawnNearbyBlock(this.x, this.y, 10);
+    }
+    draw(){
+        let transform = position(this.x, this.y);
+        let size = 18 * this.sizeMultiplier;
+
+        let lowHealthFactor = (100 - this.health) / 100;
+        let displayColor = blendColor(this.color, this.lowHealthColor, lowHealthFactor);
+
+        canvasdraw.save();
+        canvasdraw.translate(transform.x, transform.y);
+        canvasdraw.scale(1, 1.6);
+        canvasdraw.rotate(Math.PI / 4);
+        canvasdraw.fillStyle = displayColor;
+        canvasdraw.fillRect(-size / 2, -size / 2, size, size);
+        canvasdraw.restore();
     }
 }
 
@@ -404,7 +630,7 @@ class Car {
         this.y = y;
         this.vy = 1;
         this.vx = 0;
-        this.speed = 2;
+        this.speed = carDefaultSpeed;
         this.angle = Math.PI/2.0;
         this.color = color;
         this.health = 100;
@@ -419,11 +645,13 @@ class Car {
         return 2 - this.health / 100;
     }
     onHit(){
+        gsap.killTweensOf(this, "bounceScale");
         this.bounceScale = 1.4;
-        gsap.to(this, { bounceScale: 1, duration: 0.5, ease: "elastic.out(1, 0.4)" });
+        gsap.to(this, { bounceScale: 1, duration: scaledDuration(hitAnimationDuration), ease: "elastic.out(1, 0.4)" });
 
+        gsap.killTweensOf(this, "colorShift");
         this.colorShift = 1;
-        gsap.to(this, { colorShift: 0, duration: 0.4, ease: "power2.out" });
+        gsap.to(this, { colorShift: 0, duration: scaledDuration(1.2), ease: "power2.out" });
     }
     move(){
         this.angle = this.angle + (Math.random() - 0.5) * 0.1;
@@ -443,15 +671,24 @@ class Car {
         }
     }
     draw(){
-        let transform = position(this.x, this.y);
-        let transform2 = position(this.x + 15 * Math.cos(this.angle)
-            , this.y + 15 * Math.sin(this.angle));
         let scale = this.sizeMultiplier * this.bounceScale;
+        let bodySize = 21 * scale;
+        let headSize = 17.5;
+        let centerDistance = 15;
+
+        let bodyCenterX = this.x + bodySize / 2;
+        let bodyCenterY = this.y + bodySize / 2;
+        let headCenterX = bodyCenterX + centerDistance * Math.cos(this.angle);
+        let headCenterY = bodyCenterY + centerDistance * Math.sin(this.angle);
+
+        let transform = position(bodyCenterX - bodySize / 2, bodyCenterY - bodySize / 2);
+        let transform2 = position(headCenterX - headSize / 2, headCenterY - headSize / 2);
+
         let bodyColor = this.colorShift > 0
             ? blendColor(this.color, this.nurtureColor, this.colorShift)
             : this.color;
-        drawRectangle(bodyColor, transform, 30 * scale);
-        drawRectangle("rgba(0,0,0,255)", transform2, 25 * scale);
+        drawRectangle(bodyColor, transform, bodySize);
+        drawRectangle("rgba(0,0,0,255)", transform2, headSize);
     }
 }
 
@@ -493,6 +730,9 @@ class Block {
         this.theta = 0;
         this.phi = 0;
         this.radius = radius;
+        this.spawnScale = 1;
+        this.spawnAngle = 0;
+        this.spawnAlpha = 1;
     }
     move(){
     }
@@ -514,15 +754,26 @@ class Block {
         this.color2 = stringToColor(allColorStrings[index2]);           
     }
     draw(){
-        let transform = position(this.x, this.y);
-        
         if (this.removed === true){
             return;
         }
+
+        let centerX = this.x + this.radius / 2;
+        let centerY = this.y + this.radius / 2;
+        let center = position(centerX, centerY);
+
+        canvasdraw.save();
+        canvasdraw.translate(center.x, center.y);
+        canvasdraw.rotate(this.spawnAngle);
+        canvasdraw.scale(this.spawnScale, this.spawnScale);
+        canvasdraw.translate(-center.x, -center.y);
+        canvasdraw.globalAlpha = this.spawnAlpha;
+
+        let transform = position(this.x, this.y);
         if (this.selected === selectionIndex){
             drawVoidRectangle("rgba(255,0,255,255)", transform, this.radius);
         }
-        
+
         let color1 = this.color1;
         let color2 = this.color2;
         let index3 = this.drawingType;
@@ -549,6 +800,8 @@ class Block {
             let innertransform = position(this.x + this.radius/4, this.y + this.radius/4);
             drawRectangle(color1, innertransform, this.radius/2);
         }
+
+        canvasdraw.restore();
     }
 }
 
@@ -648,6 +901,16 @@ function reloadMap(){
     numberOfSorts = parseInt(document.getElementById("numberOfSortsInput").value);
     init();
 }
+
+function updateBlockDamage(){
+    blockDamage = parseFloat(document.getElementById("blockDamageInput").value);
+}
+updateBlockDamage();
+
+function updateAnimationDurationFactor(){
+    animationDurationFactor = parseFloat(document.getElementById("animationDurationFactorInput").value);
+}
+updateAnimationDurationFactor();
 
 function togglePause(){
     paused = !paused;
