@@ -26,9 +26,11 @@ function scaledDuration(duration){
     return duration * animationDurationFactor / 100;
 }
 let hitAnimationDuration = 1.5;
-let maxCars = 8;
+let maxCars = 4;
 let maxStars = 8;
 let pendingCarSpawns = 0;
+let starBlockCreationRange = 10;
+let carEatDistance = 20;
 let carDefaultSpeed = 2 * 0.75;
 let carMinSpeed = 1 * 0.75;
 let carMaxSpeed = 3 * 0.75;
@@ -327,14 +329,20 @@ function match(block1, block2, turns){
     previousSelectedBlock = null;
 }
 
-function blockHitDamage(distance){
-    let minDistance = 2 * gridSize;
-    let maxDistance = 6 * gridSize;
+function computeHitDamage(distance, minDistance, maxDistance){
     let maxDamage = blockDamage;
 
     if (distance <= minDistance) { return maxDamage; }
     if (distance >= maxDistance) { return 0; }
     return maxDamage * (maxDistance - distance) / (maxDistance - minDistance);
+}
+
+function blockHitDamage(distance){
+    return computeHitDamage(distance, 2 * gridSize, 6 * gridSize);
+}
+
+function starHitDamage(distance){
+    return computeHitDamage(distance, 1.5 * gridSize, 4.5 * gridSize);
 }
 
 function applyBlockRemovalDamage(block, newCars, newStars){
@@ -374,7 +382,7 @@ function applyStarDamage(block, newStars){
         let dx = e.x - centerX;
         let dy = e.y - centerY;
         let distance = Math.sqrt(dx * dx + dy * dy);
-        let damage = blockHitDamage(distance);
+        let damage = starHitDamage(distance);
         if (damage > 0){
             e.loseHealth(damage);
             if (e.health < 50){
@@ -438,7 +446,7 @@ function spawnNearbyBlock(x, y, rangeInGrid){
 
     gsap.killTweensOf(chosen, "spawnScale,spawnAngle,spawnAlpha");
     chosen.spawnScale = 0;
-    chosen.spawnAngle = 4 * Math.PI;
+    chosen.spawnAngle = 2 * Math.PI;
     chosen.spawnAlpha = 0;
     gsap.to(chosen, { spawnScale: 1, duration: scaledDuration(0.8), ease: "power3.out" });
     gsap.to(chosen, { spawnAngle: 0, duration: scaledDuration(0.8), ease: "power3.out" });
@@ -460,7 +468,7 @@ function applyStarMovement(block, newStars){
         if (distance >= range) { continue; }
 
         let angle = Math.atan2(dy, dx);
-        let amount = Math.random() * gridSize;
+        let amount = getRandomFloat(gridSize, gridSize * 3);
         let targetX = e.x + amount * Math.cos(angle);
         let targetY = e.y + amount * Math.sin(angle);
         gsap.killTweensOf(e, "x,y");
@@ -475,13 +483,28 @@ function randomCarColor(){
     return "rgba(" + r + "," + g + "," + b + ",255)";
 }
 
+function canSpawnStarAt(x, y){
+    let minDistance = starBlockCreationRange * gridSize;
+    for (var e of effects){
+        if (!(e instanceof Star)) { continue; }
+
+        let dx = e.x - x;
+        let dy = e.y - y;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < minDistance){
+            return false;
+        }
+    }
+    return true;
+}
+
 function respawnCar(deadCar, newCars, newStars){
     let index = cars.indexOf(deadCar);
     if (index === -1) { return; }
     cars.splice(index, 1);
 
     let starCount = effects.filter(e => e instanceof Star).length;
-    if (starCount < maxStars){
+    if (starCount < maxStars && canSpawnStarAt(deadCar.x, deadCar.y)){
         let star = new Star(deadCar.x, deadCar.y);
         effects.push(star);
         newStars.push(star);
@@ -538,8 +561,8 @@ class RingEffect {
         });
     }
     draw(){
-        this.drawRing(0, 40, 14);
-        this.drawRing(0.15, 55, 10);
+        this.drawRing(0, 40, 10.5);
+        this.drawRing(0.15, 55, 7.5);
     }
     drawRing(delay, maxRadius, maxLineWidth){
         let localT = (this.progress.t - delay) / (1 - delay);
@@ -572,7 +595,7 @@ class Star {
     }
     regen(){
         this.health = Math.min(100, this.health + 20);
-        spawnNearbyBlock(this.x, this.y, 10);
+        spawnNearbyBlock(this.x, this.y, starBlockCreationRange);
     }
     draw(){
         let transform = position(this.x, this.y);
@@ -866,6 +889,21 @@ function init(){
 }
 
 
+function handleCarEatingStars(){
+    for (var c of cars){
+        for (var e of effects){
+            if (!(e instanceof Star) || e.done) { continue; }
+
+            let dx = c.x - e.x;
+            let dy = c.y - e.y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < carEatDistance){
+                e.done = true;
+            }
+        }
+    }
+}
+
 function animate(timestamp){
     if (paused){ return; }
     requestAnimationFrame(animate);
@@ -879,10 +917,17 @@ function animate(timestamp){
 
     canvasdraw.fillStyle = "rgba(255, 255, 255, 0.75)";
     canvasdraw.fillRect(0, 0, canvas.width, canvas.height);
+
+    handleCarEatingStars();
+    for (var e of effects){
+        if (e.done || !(e instanceof Star)) { continue; }
+        e.draw();
+    }
+
     for (var j = 0; j <= gridHeight; j++) {
         for (var i = 0; i <= gridWidth; i++) {
             map[j][i].move();
-            map[j][i].draw();           
+            map[j][i].draw();
         }
     }
     for (var c of cars){
@@ -890,6 +935,7 @@ function animate(timestamp){
         c.draw();
     }
     for (var e of effects){
+        if (e.done || e instanceof Star) { continue; }
         e.draw();
     }
     effects = effects.filter(e => !e.done);
