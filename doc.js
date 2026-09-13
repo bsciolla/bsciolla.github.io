@@ -30,7 +30,7 @@ function scaledDuration(duration){
     return duration * animationDurationFactor / 100;
 }
 let hitAnimationDuration = 1.5;
-let maxCars = 4;
+let maxCars = 8;
 let maxStars = 8;
 let pendingCarSpawns = 0;
 let starBlockCreationRange = 10;
@@ -66,6 +66,14 @@ trunkLayer.width = canvas.width;
 trunkLayer.height = canvas.height;
 const trunkLayerDraw = trunkLayer.getContext("2d");
 let trunkLayerDirty = true;
+let branchLayerDirty = false;
+
+// Drawn once at startup from the same tree-polygon shapes, then reused unchanged every frame.
+const backgroundLayer = document.createElement("canvas");
+backgroundLayer.width = canvas.width;
+backgroundLayer.height = canvas.height;
+const backgroundLayerDraw = backgroundLayer.getContext("2d");
+generateBackgroundLayer();
 const mouse = {
     x: undefined,
     y: undefined
@@ -157,7 +165,20 @@ function selectElement(block) {
         selectionIndex++;
         block.selected = selectionIndex;
         previousSelectedBlock = block;
+        playAwaitingMatchPulse(block);
     }
+}
+
+function playAwaitingMatchPulse(block){
+    gsap.killTweensOf(block, "spawnScale");
+    block.spawnScale = 1;
+    gsap.to(block, {
+        spawnScale: 1.25,
+        duration: scaledDuration(0.15),
+        ease: "power2.out",
+        yoyo: true,
+        repeat: 1,
+    });
 }
 
 function relateToNearbyElement(iref, jref) {
@@ -531,7 +552,7 @@ function match(block1, block2, turns){
 
     maybeSpawnTokenFromRemoval(block1, block2);
 
-    propagateTrunkLinks();
+    propagateTrunkJuice();
 }
 
 function effectiveBlockDamage(){
@@ -628,35 +649,38 @@ function applyTrunkDamage(block, newTrunks){
     let damage = trunkHitDamage(closestDistance);
     if (damage > 0){
         closest.loseHealth(damage);
+        closest.gainJuice(damage * trunkJuiceGainFactor);
+
+        if (Math.random() < trunkJuiceRandomBonusChance){
+            let luckyTrunk = trunks[getRandomInt(0, trunks.length - 1)];
+            luckyTrunk.gainJuice(trunkJuiceRandomBonusAmount);
+        }
     }
 }
 
-function propagateTrunkLinks(){
+function propagateTrunkJuice(){
     let degree = new Map();
     for (var link of trunkLinks){
         degree.set(link.a, (degree.get(link.a) || 0) + 1);
         degree.set(link.b, (degree.get(link.b) || 0) + 1);
     }
 
-    // Metropolis weights keep the averaging stable and conserve total health regardless of link count.
+    // Metropolis weights keep this stable regardless of link count: juice equalizes toward
+    // the shared average across each trunk<->trunk link, rather than each trunk hoarding its own.
     let deltas = new Map();
     for (var link of trunkLinks){
         let weight = trunkLinkDiffusionRate / (1 + Math.max(degree.get(link.a), degree.get(link.b)));
-        let flow = weight * (link.b.health - link.a.health);
-        deltas.set(link.a, (deltas.get(link.a) || 0) + flow);
-        deltas.set(link.b, (deltas.get(link.b) || 0) - flow);
+        let target = (link.a.juice + link.b.juice) / 2;
+        deltas.set(link.a, (deltas.get(link.a) || 0) + weight * (target - link.a.juice));
+        deltas.set(link.b, (deltas.get(link.b) || 0) + weight * (target - link.b.juice));
     }
     for (var [trunk, delta] of deltas){
-        trunk.health += delta;
-    }
-
-    for (var trunk of trunks.slice()){
-        if (trunk.health < trunkRegenThreshold){
-            trunk.regen();
+        if (delta > 0){
+            trunk.gainJuice(delta);
+        } else {
+            trunk.juice = Math.max(0, trunk.juice + delta);
         }
     }
-
-    trunkLayerDirty = true;
 }
 
 function spawnMissRate(candidate){
@@ -747,27 +771,29 @@ function findClosestOtherStar(star){
 
 let closestTrunkSearchRange = 5 * blockSize;
 
-function closestTrunksTo(x, y, count, exclude){
+function nearbyTrunksTo(x, y, exclude){
+    // Every one of pickAvoidingAngle's candidates must be scored against ALL trunks in range,
+    // not just a top-N closest-to-parent shortlist: a trunk that isn't among the parent's own
+    // nearest neighbors can still be the closest thing to one specific candidate direction, and
+    // ignoring it lets that candidate land on (or right next to) an existing trunk unnoticed.
     let maxDistanceSquared = closestTrunkSearchRange * closestTrunkSearchRange;
-    let nearby = trunks.filter(t => {
+    return trunks.filter(t => {
         if (t === exclude) { return false; }
         let dx = t.x - x;
         let dy = t.y - y;
         return dx * dx + dy * dy <= maxDistanceSquared;
     });
-    nearby.sort((a, b) => {
-        let da = (a.x - x) * (a.x - x) + (a.y - y) * (a.y - y);
-        let db = (b.x - x) * (b.x - x) + (b.y - y) * (b.y - y);
-        return da - db;
-    });
-    return nearby.slice(0, count);
 }
 
 let angleNoiseFactor = 0.25;
 let trunkHealthInjectionFactor = 1.0;
 let trunkOvershootBlockRange = 3;
 let trunkLinkDiffusionRate = 1.0;
-let trunkRegenThreshold = 50;
+let trunkJuiceGainFactor = 1.5;
+let trunkJuiceThreshold = 100;
+let trunkJuiceRandomBonusChance = 0.1;
+let trunkJuiceRandomBonusAmount = 45;
+let trunkMinGrowthClearanceFactor = 0.5;
 
 function pickAvoidingAngle(x, y, distance, neighbors, fallbackAngle){
     if (neighbors.length === 0){
@@ -798,6 +824,10 @@ function pickAvoidingAngle(x, y, distance, neighbors, fallbackAngle){
             bestScore = noisyScore;
             bestAngle = theta;
         }
+    }
+
+    if (bestScore < distance * trunkMinGrowthClearanceFactor){
+        return null;
     }
 
     return bestAngle;
@@ -1055,12 +1085,38 @@ function rebuildTrunkLayer(){
     trunkLayerDirty = false;
 }
 
+function rebuildBranchLayer(){
+    branchLayerDraw.clearRect(0, 0, branchLayer.width, branchLayer.height);
+    for (var b of branches){
+        if (b.settled){ b.draw(branchLayerDraw); }
+    }
+    branchLayerDirty = false;
+}
+
+function generateBackgroundLayer(){
+    let shapeCount = 120;
+    for (let i = 0; i < shapeCount; i++){
+        let width = getRandomFloat(60, 160);
+        let height = getRandomFloat(80, 220);
+        let polygon = generateIrregularRectPolygon(width, height, 0.18);
+        let x = getRandomFloat(0, backgroundLayer.width);
+        let y = getRandomFloat(0, backgroundLayer.height);
+        let angle = Math.random() * Math.PI * 2;
+        let shade = getRandomInt(200, 235);
+        let alpha = getRandomFloat(0.15, 0.35);
+        let color = "rgba(" + shade + "," + shade + "," + shade + "," + alpha + ")";
+        drawIrregularPolygon(backgroundLayerDraw, x, y, angle, 1, polygon, color);
+    }
+}
+
+let trunkBaseColor = blendColor("rgba(128,0,0,255)", [255, 255, 255], 0.5);
+
 function randomDarkenedTrunkColor(){
-    return blendColor("rgba(128,0,0,255)", [0, 0, 0], getRandomFloat(0, 0.5));
+    return blendColor(trunkBaseColor, [0, 0, 0], getRandomFloat(0, 0.5));
 }
 
 class Branch {
-    constructor(x, y, angle, spawnDelay){
+    constructor(x, y, angle, spawnDelay, parentTrunk, childTrunk){
         this.x = x;
         this.y = y;
         this.done = false;
@@ -1069,6 +1125,8 @@ class Branch {
         this.width = 22;
         this.height = 32;
         this.polygon = generateIrregularRectPolygon(this.width, this.height, 0.18);
+        this.parentTrunk = parentTrunk || null;
+        this.childTrunk = childTrunk || null;
 
         this.scale = 0;
         this.settled = false;
@@ -1079,7 +1137,7 @@ class Branch {
             ease: "back.out(2)",
             onComplete: () => {
                 this.settled = true;
-                this.draw(branchLayerDraw);
+                branchLayerDirty = true;
             },
         });
     }
@@ -1102,6 +1160,7 @@ class Trunk {
         this.height = 32;
         this.polygon = generateIrregularRectPolygon(this.width, this.height, 0.18);
         this.spawnedTrunk = null;
+        this.juice = 0;
 
         this.spawnScale = 0;
         this.settled = false;
@@ -1128,6 +1187,15 @@ class Trunk {
         if (this.spawnedTrunk === null) { return; }
         this.spawnedTrunk.gainHealth(damageAmount * trunkHealthInjectionFactor);
     }
+    gainJuice(amount){
+        if (amount <= 0) { return; }
+        this.juice += amount;
+
+        while (this.juice >= trunkJuiceThreshold){
+            this.juice -= trunkJuiceThreshold;
+            spawnNearbyBlock(this.x, this.y, trunkOvershootBlockRange);
+        }
+    }
     gainHealth(amount){
         let wasUnderCap = this.health <= 100;
         this.health += amount;
@@ -1147,8 +1215,12 @@ class Trunk {
         let branchCount = 3;
         let branchStagger = 0.3;
 
-        let neighbors = closestTrunksTo(this.x, this.y, 4, this);
+        let neighbors = nearbyTrunksTo(this.x, this.y, this);
         let angle = pickAvoidingAngle(this.x, this.y, distance, neighbors, Math.random() * Math.PI * 2);
+        if (angle === null){
+            this.health = 100;
+            return;
+        }
 
         let child = new Trunk(
             this.x + distance * Math.cos(angle),
@@ -1164,7 +1236,7 @@ class Trunk {
             let branchX = this.x + (child.x - this.x) * t;
             let branchY = this.y + (child.y - this.y) * t;
 
-            branches.push(new Branch(branchX, branchY, angle, (i - 1) * branchStagger));
+            branches.push(new Branch(branchX, branchY, angle, (i - 1) * branchStagger, this, child));
         }
 
         this.health = 100;
@@ -1413,7 +1485,7 @@ class Block {
 function drawVoidRoundedRectangle(color, transform, size, cornerRadius){
     traceRoundedRectPath(transform.x, transform.y, size, cornerRadius);
     canvasdraw.strokeStyle = color;
-    canvasdraw.lineWidth = 2;
+    canvasdraw.lineWidth = 4;
     canvasdraw.stroke();
 }
 
@@ -1502,6 +1574,7 @@ let scenarios = {
         completionBlockCount: (gridWidth + 1) * (gridHeight + 1),
         initialCarCount: 2,
         starsEnabled: false,
+        eatableByDefault: true,
         setup: randomConformation,
     },
 };
@@ -1559,7 +1632,7 @@ function init(){
     trunkLayerDirty = true;
     activeTokenBlocks = [];
     damageTokenCounter = 0;
-    starsEatable = false;
+    starsEatable = !!currentScenario.eatableByDefault;
     carSpawnedTrunkCount = 0;
     randomModeStuck = false;
     let blocksToAttribute = [];
@@ -1613,6 +1686,50 @@ function handleCarEatingStars(){
     }
 }
 
+function removeTrunk(trunk){
+    let index = trunks.indexOf(trunk);
+    if (index === -1) { return; }
+    trunks.splice(index, 1);
+
+    trunkLinks = trunkLinks.filter(link => link.a !== trunk && link.b !== trunk);
+    for (var other of trunks){
+        if (other.spawnedTrunk === trunk){
+            other.spawnedTrunk = null;
+        }
+    }
+
+    gsap.killTweensOf(trunk);
+    trunkLayerDirty = true;
+
+    let keptBranches = [];
+    for (var b of branches){
+        if (b.parentTrunk === trunk || b.childTrunk === trunk){
+            gsap.killTweensOf(b);
+        } else {
+            keptBranches.push(b);
+        }
+    }
+    branches = keptBranches;
+    branchLayerDirty = true;
+}
+
+function handleCarEatingTrunks(){
+    if (!starsEatable) { return; }
+
+    for (var c of cars){
+        if (c.turnCount < 3) { continue; }
+
+        for (var t of trunks.slice()){
+            let dx = c.x - t.x;
+            let dy = c.y - t.y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < carEatDistance){
+                removeTrunk(t);
+            }
+        }
+    }
+}
+
 function animate(timestamp){
     if (paused){ return; }
     requestAnimationFrame(animate);
@@ -1626,11 +1743,16 @@ function animate(timestamp){
 
     canvasdraw.fillStyle = "rgba(255, 255, 255, 0.75)";
     canvasdraw.fillRect(0, 0, canvas.width, canvas.height);
+    canvasdraw.drawImage(backgroundLayer, 0, 0);
 
     handleCarEatingStars();
+    handleCarEatingTrunks();
     for (var e of effects){
         if (e.done || !(e instanceof Star)) { continue; }
         e.draw();
+    }
+    if (branchLayerDirty){
+        rebuildBranchLayer();
     }
     canvasdraw.drawImage(branchLayer, 0, 0);
     for (var b of branches){
