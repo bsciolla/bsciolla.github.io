@@ -53,8 +53,9 @@ let gridHeight = 18;
 let matchingDistance = Math.max(gridWidth, gridHeight);
 let closeRange = 5;
 let miniMargin = 0;
-canvas.height = gridSize * gridHeight;
-canvas.width = gridSize * gridWidth;
+// Grid indices run 0..gridWidth inclusive, with each block offset by 10px; keep a matching 10px margin at the far edge.
+canvas.height = gridSize * (gridHeight + 1) + 10;
+canvas.width = gridSize * (gridWidth + 1) + 10;
 
 // Settled branches never change, so they are drawn once into this layer; trunks are redrawn into theirs only when marked dirty.
 const branchLayer = document.createElement("canvas");
@@ -369,12 +370,12 @@ function checkLineY(block1, block2, jmini, deltaj, i){
 
 
 function tokenCoreColor(token){
-    if (token.key === "damageUp") { return "rgba(220,40,40,255)"; }
-    if (token.key === "damageDown") { return "rgba(40,100,220,255)"; }
+    if (token.key === "damageUp") { return "rgba(212,120,60,255)"; }
+    if (token.key === "damageDown") { return "rgba(52,160,164,255)"; }
     if (token.key === "starEatToggle") {
-        return starsEatable ? "rgba(255,255,255,255)" : "rgba(0,0,0,255)";
+        return starsEatable ? "rgba(224,208,184,255)" : "rgba(44,56,62,255)";
     }
-    return "rgba(255,255,255,255)";
+    return "rgba(224,208,184,255)";
 }
 
 function removeTokenFromActiveList(block){
@@ -429,6 +430,7 @@ function spawnTokenAt(block){
 }
 
 function maybeSpawnTokenFromRemoval(block1, block2){
+    if (!currentScenario.tokensEnabled) { return; }
     if (Math.random() >= tokenSpawnChance) { return; }
 
     let target = Math.random() < 0.5 ? block1 : block2;
@@ -872,10 +874,9 @@ function applyStarMovement(block, newStars){
 }
 
 function randomCarColor(){
-    let r = getRandomInt(60, 255);
-    let g = getRandomInt(60, 255);
-    let b = getRandomInt(60, 255);
-    return "rgba(" + r + "," + g + "," + b + ",255)";
+    let carColors = ["rgba(220,118,48,255)", "rgba(28,110,116,255)", "rgba(44,56,62,255)", "rgba(196,200,200,255)"];
+    let index = getRandomInt(0, carColors.length - 1);
+    return carColors[index];
 }
 
 function respawnCar(deadCar, newCars, newStars, newTrunks){
@@ -1000,7 +1001,7 @@ class Star {
     constructor(x, y, color){
         this.x = x;
         this.y = y;
-        this.color = color || "rgba(255,215,0,255)";
+        this.color = color || "rgba(255,190,80,255)";
         this.done = false;
         this.health = 100;
         this.lowHealthColor = [255, 69, 0];
@@ -1109,7 +1110,7 @@ function generateBackgroundLayer(){
     }
 }
 
-let trunkBaseColor = blendColor("rgba(128,0,0,255)", [255, 255, 255], 0.5);
+let trunkBaseColor = blendColor("rgba(120,80,60,255)", [255, 255, 255], 0.5);
 
 function randomDarkenedTrunkColor(){
     return blendColor(trunkBaseColor, [0, 0, 0], getRandomFloat(0, 0.5));
@@ -1344,21 +1345,22 @@ class Car {
         canvasdraw.save();
         canvasdraw.globalAlpha = 0.6;
         drawRectangle(bodyColor, transform, bodySize);
-        drawRectangle("rgba(0,0,0,255)", transform2, headSize);
+        drawRectangle("rgba(44,56,62,255)", transform2, headSize);
         canvasdraw.restore();
     }
 }
 
 let colorAssociations = [[]];
 
-let allColorStrings = 
+let blockOutlineColor = "rgba(44,56,62,255)";
+let allColorStrings =
     ["B", "R", "O", "U", "G"];
 let allColorsRgb = [
-    [0, 0, 0],
-    [255, 0, 0],
-    [255, 170, 0],
-    [37, 94, 255],
-    [0, 204, 0],];
+    [44, 56, 62],
+    [220, 118, 48],
+    [244, 232, 204],
+    [28, 110, 116],
+    [196, 200, 200],];
 
 function stringToColor(color){
     let index = allColorStrings.indexOf(color);
@@ -1429,9 +1431,6 @@ class Block {
 
         let transform = position(this.x, this.y);
         let cornerRadius = this.radius * blockCornerRadiusFactor;
-        if (this.selected === selectionIndex){
-            drawVoidRoundedRectangle("rgba(255,0,255,255)", transform, this.radius, cornerRadius);
-        }
 
         if (this.token){
             let swapped = Math.floor(performance.now() / 500) % 2 === 1;
@@ -1475,6 +1474,15 @@ class Block {
         }
 
         canvasdraw.restore();
+
+        traceRoundedRectPath(transform.x, transform.y, this.radius, cornerRadius);
+        canvasdraw.strokeStyle = blockOutlineColor;
+        canvasdraw.lineWidth = 1.5;
+        canvasdraw.stroke();
+
+        if (this.selected === selectionIndex){
+            drawVoidRoundedRectangle("rgba(255,190,80,255)", transform, this.radius, cornerRadius);
+        }
 
         canvasdraw.restore();
     }
@@ -1520,8 +1528,8 @@ function drawCheckerboard(transform, size, cornerRadius, swapped){
     let y = transform.y;
     let cellCount = 4;
     let cellSize = size / cellCount;
-    let colorA = "rgba(255,215,0,255)";
-    let colorB = "rgba(255,140,0,255)";
+    let colorA = "rgba(224,208,184,255)";
+    let colorB = "rgba(212,120,60,255)";
 
     canvasdraw.save();
     traceRoundedRectPath(x, y, size, cornerRadius);
@@ -1542,15 +1550,16 @@ function drawCheckerboard(transform, size, cornerRadius, swapped){
 
 
 function randomConformation(blocksToAttribute){
-    let goOn = true;
-    while(goOn)
-    {
+    while (blocksToAttribute.length >= 2){
         let newSort = getRandomInt(0, numberOfSorts - 1);
         blocksToAttribute[0].setSort(newSort);
-        let rank = getRandomInt(0, blocksToAttribute.length - 1);
+        let rank = getRandomInt(1, blocksToAttribute.length - 1);
         blocksToAttribute[rank].setSort(newSort);
         blocksToAttribute = blocksToAttribute.filter(b => b.sort === -1);
-        goOn = blocksToAttribute.length >= 2;
+    }
+    // An unpaired leftover would otherwise stay unremoved with no sort: invisible, yet blocking paths.
+    for (var leftover of blocksToAttribute){
+        leftover.removed = true;
     }
 }
 
@@ -1560,6 +1569,7 @@ let scenarios = {
         completionBlockCount: (gridWidth + 1) * (gridHeight + 1),
         initialCarCount: 2,
         starsEnabled: true,
+        tokensEnabled: true,
         setup: randomConformation,
     },
     tutorial: {
@@ -1567,6 +1577,7 @@ let scenarios = {
         completionBlockCount: 10,
         initialCarCount: 0,
         starsEnabled: true,
+        tokensEnabled: false,
         setup: randomConformation,
     },
     tree: {
@@ -1574,6 +1585,7 @@ let scenarios = {
         completionBlockCount: (gridWidth + 1) * (gridHeight + 1),
         initialCarCount: 2,
         starsEnabled: false,
+        tokensEnabled: true,
         eatableByDefault: true,
         setup: randomConformation,
     },
