@@ -1418,13 +1418,19 @@ let themes = {
     },
     colorful: {
         label: "Colorful",
-        blockColors: [[44, 56, 62], [255, 0, 0], [255, 170, 0], [37, 94, 255], [0, 204, 0]],
-        // Every block pairs one bright color with one neutral, never two brights (no red with blue).
-        neutralColorIndices: [0],
+        // Yellow at index 4 is not pure yellow: it's blended 10% toward this theme's orange (index 2).
+        blockColors: [[44, 56, 62], [255, 0, 0], [255, 170, 0], [10, 40, 170], [255, 247, 0]],
+        // Every block pairs one bright color with a shaded twin of itself, never two brights
+        // (no red with blue). Red and yellow shade toward black; blue shades toward cream/white
+        // instead — targets aligned by position with brightColorIndices (red, blue, yellow).
         brightColorIndices: [1, 3, 4],
+        brightNeutralTargets: [[0, 0, 0], [255, 255, 255], [0, 0, 0]],
+        // Blue leans much harder toward its target than the shared neutralShadeFactor (red/yellow
+        // toward black) so it reads as near-white, not just a pale blue.
+        brightNeutralFactors: [0.92, 0.98, 0.92],
+        neutralShadeFactor: 0.92,
         legacyShapeEncoding: false,
-        blockOutline: "rgba(44,56,62,255)",
-        blockOutlineWidth: 0.25,
+        blockOutline: null,
         selection: "rgba(255,0,255,255)",
         tokenDamageUp: "rgba(220,40,40,255)",
         tokenDamageDown: "rgba(40,100,220,255)",
@@ -1434,7 +1440,7 @@ let themes = {
         checkerA: "rgba(220,218,212,255)",
         checkerB: "rgba(255,170,0,255)",
         star: "rgba(255,215,0,255)",
-        carColors: ["rgba(255,0,0,255)", "rgba(255,170,0,255)", "rgba(37,94,255,255)", "rgba(0,204,0,255)", "rgba(44,56,62,255)"],
+        carColors: ["rgba(255,0,0,255)", "rgba(255,170,0,255)", "rgba(10,40,170,255)", "rgba(255,247,0,255)", "rgba(44,56,62,255)"],
         carHead: "rgba(44,56,62,255)",
         trunkBase: "rgba(120,80,60,255)",
     },
@@ -1474,21 +1480,38 @@ function blendRgb(baseRgb, targetRgb, factor){
     ];
 }
 
-let neutralShadeFactor = 0.85;
+let defaultNeutralShadeFactor = 0.85;
 
 function themeColorPairs(theme){
     if (theme.colorPairs) { return theme.colorPairs; }
 
     let pairs = [];
-    if (theme.brightColorIndices){
-        // Each bright is paired with a shaded twin of itself (blended toward each neutral at
-        // neutralShadeFactor), not with the neutral's own raw color. Computed once here and
-        // appended to blockColors, so every later lookup (setSort, etc.) just reuses the cached entry.
+    let shadeFactor = theme.neutralShadeFactor !== undefined ? theme.neutralShadeFactor : defaultNeutralShadeFactor;
+    if (theme.brightNeutralTargets){
+        // Each bright gets its own blend target (e.g. black for one color, cream/white for
+        // another) instead of every bright sharing the same neutral. Aligned by position with
+        // brightColorIndices. Computed once here and appended to blockColors, so every later
+        // lookup (setSort, etc.) just reuses the cached entry.
+        for (let idx = 0; idx < theme.brightColorIndices.length; idx++){
+            let bright = theme.brightColorIndices[idx];
+            let brightRgb = theme.blockColors[bright];
+            let targetRgb = theme.brightNeutralTargets[idx];
+            let targetFactor = theme.brightNeutralFactors ? theme.brightNeutralFactors[idx] : shadeFactor;
+            let shadedRgb = blendRgb(brightRgb, targetRgb, targetFactor);
+            let shadedIndex = theme.blockColors.push(shadedRgb) - 1;
+
+            pairs.push([bright, shadedIndex]);
+            pairs.push([shadedIndex, bright]);
+        }
+    } else if (theme.brightColorIndices){
+        // Each bright is paired with a shaded twin of itself (blended toward each neutral), not
+        // with the neutral's own raw color. Computed once here and appended to blockColors, so
+        // every later lookup (setSort, etc.) just reuses the cached entry.
         for (var bright of theme.brightColorIndices){
             let brightRgb = theme.blockColors[bright];
             for (var neutral of theme.neutralColorIndices){
                 let neutralRgb = theme.blockColors[neutral];
-                let shadedRgb = blendRgb(brightRgb, neutralRgb, neutralShadeFactor);
+                let shadedRgb = blendRgb(brightRgb, neutralRgb, shadeFactor);
                 let shadedIndex = theme.blockColors.push(shadedRgb) - 1;
 
                 pairs.push([bright, shadedIndex]);
