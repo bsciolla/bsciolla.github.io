@@ -11,6 +11,16 @@ let trunkLinks = [];
 let paused = false;
 let targetFps = 60;
 let frameInterval = 1000 / targetFps;
+
+// Random block shine: board-wide, independent of damage/match animations. We want a mean time of
+// blockShineMeanIntervalSeconds between shine events across the WHOLE board. Modeling shines as a
+// Poisson process, mean interval = half life / ln(2) (same relationship as radioactive decay: half
+// life is the time by which there's a 50% chance an event has already happened). So:
+//   half life = mean interval * ln(2)
+// Each block then independently rolls a per-frame chance so their combined (summed) rate matches
+// this board-wide rate — see maybeTriggerRandomShines.
+let blockShineMeanIntervalSeconds = 5;
+let blockShineHalfLifeSeconds = blockShineMeanIntervalSeconds * Math.LN2;
 let lastFrameTime = 0;
 let theta;
 let score = 0;
@@ -18,6 +28,7 @@ let height = 20;
 let gridSize = 50;
 let blockSize = 40;
 let blockCornerRadiusFactor = 0.18;
+let blockShapeCount = 7;
 let originx = 0;
 let originy = 0;
 let previousSelectedBlock = null;
@@ -218,8 +229,7 @@ function relateElements(block1, block2){
 
     let possible1 = squareMatch(block1, block2);
     if (possible1){
-        match(block1, block2, 2);
-        return true;
+        return match(block1, block2, 2);
     } else {
         let possible =
             followALineMatchX(block1, block2, 1)
@@ -227,8 +237,7 @@ function relateElements(block1, block2){
             || followALineMatchY(block1, block2, 1)
             || followALineMatchY(block1, block2, -1);
         if (possible){
-            match(block1, block2, 3);
-            return true;
+            return match(block1, block2, 3);
         }
     }
 
@@ -370,12 +379,12 @@ function checkLineY(block1, block2, jmini, deltaj, i){
 
 
 function tokenCoreColor(token){
-    if (token.key === "damageUp") { return "rgba(212,120,60,255)"; }
-    if (token.key === "damageDown") { return "rgba(52,160,164,255)"; }
+    if (token.key === "damageUp") { return currentTheme.tokenDamageUp; }
+    if (token.key === "damageDown") { return currentTheme.tokenDamageDown; }
     if (token.key === "starEatToggle") {
-        return starsEatable ? "rgba(224,208,184,255)" : "rgba(44,56,62,255)";
+        return starsEatable ? currentTheme.tokenToggleOn : currentTheme.tokenToggleOff;
     }
-    return "rgba(224,208,184,255)";
+    return currentTheme.tokenDefault;
 }
 
 function removeTokenFromActiveList(block){
@@ -513,7 +522,7 @@ function triggerCarMovementBurst(){
 function match(block1, block2, turns){
     if (block1.sort !== block2.sort)
     {
-        return;
+        return false;
     }
 
     randomModeStuck = false;
@@ -555,6 +564,7 @@ function match(block1, block2, turns){
     maybeSpawnTokenFromRemoval(block1, block2);
 
     propagateTrunkJuice();
+    return true;
 }
 
 function effectiveBlockDamage(){
@@ -710,7 +720,6 @@ function spawnMissRate(candidate){
 
 function spawnNearbyBlock(x, y, rangeInGrid){
     let range = rangeInGrid * gridSize;
-    let minRange = range / 2;
     let candidates = [];
 
     for (var j = 0; j <= gridHeight; j++) {
@@ -723,23 +732,27 @@ function spawnNearbyBlock(x, y, rangeInGrid){
             let dx = centerX - x;
             let dy = centerY - y;
             let distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance >= minRange && distance < range){
-                candidates.push(candidate);
+            if (distance < range){
+                candidates.push({ block: candidate, distance: distance });
             }
         }
     }
 
-    if (candidates.length === 0) { return; }
+    // Closest empty cells are tried first; a farther one is only reached once every closer
+    // candidate has either failed its miss roll or turned out not to be empty in the first place.
+    candidates.sort((a, b) => a.distance - b.distance);
 
-    let chosen = candidates[getRandomInt(0, candidates.length - 1)];
+    for (var candidate of candidates){
+        let chosen = candidate.block;
+        if (Math.random() < spawnMissRate(chosen)) { continue; }
 
-    if (Math.random() < spawnMissRate(chosen)) { return; }
+        chosen.setSort(getRandomInt(0, numberOfSorts - 1));
+        chosen.removed = false;
+        randomModeStuck = false;
 
-    chosen.setSort(getRandomInt(0, numberOfSorts - 1));
-    chosen.removed = false;
-    randomModeStuck = false;
-
-    playBlockSpawnAnimation(chosen);
+        playBlockSpawnAnimation(chosen);
+        return;
+    }
 }
 
 function playBlockSpawnAnimation(block){
@@ -874,9 +887,14 @@ function applyStarMovement(block, newStars){
 }
 
 function randomCarColor(){
-    let carColors = ["rgba(220,118,48,255)", "rgba(28,110,116,255)", "rgba(44,56,62,255)", "rgba(196,200,200,255)"];
-    let index = getRandomInt(0, carColors.length - 1);
-    return carColors[index];
+    let carColors = currentTheme.carColors;
+    if (carColors === null){
+        let r = getRandomInt(60, 255);
+        let g = getRandomInt(60, 255);
+        let b = getRandomInt(60, 255);
+        return "rgba(" + r + "," + g + "," + b + ",255)";
+    }
+    return carColors[getRandomInt(0, carColors.length - 1)];
 }
 
 function respawnCar(deadCar, newCars, newStars, newTrunks){
@@ -1001,7 +1019,7 @@ class Star {
     constructor(x, y, color){
         this.x = x;
         this.y = y;
-        this.color = color || "rgba(255,190,80,255)";
+        this.color = color || currentTheme.star;
         this.done = false;
         this.health = 100;
         this.lowHealthColor = [255, 69, 0];
@@ -1110,10 +1128,12 @@ function generateBackgroundLayer(){
     }
 }
 
-let trunkBaseColor = blendColor("rgba(120,80,60,255)", [255, 255, 255], 0.5);
+function trunkBaseColor(){
+    return blendColor(currentTheme.trunkBase, [255, 255, 255], 0.5);
+}
 
-function randomDarkenedTrunkColor(){
-    return blendColor(trunkBaseColor, [0, 0, 0], getRandomFloat(0, 0.5));
+function darkenedTrunkColor(darken){
+    return blendColor(trunkBaseColor(), [0, 0, 0], darken);
 }
 
 class Branch {
@@ -1121,7 +1141,7 @@ class Branch {
         this.x = x;
         this.y = y;
         this.done = false;
-        this.color = randomDarkenedTrunkColor();
+        this.darken = getRandomFloat(0, 0.5);
         this.angle = angle;
         this.width = 22;
         this.height = 32;
@@ -1142,6 +1162,9 @@ class Branch {
             },
         });
     }
+    get color(){
+        return darkenedTrunkColor(this.darken);
+    }
     draw(ctx){
         let transform = position(this.x, this.y);
         drawIrregularPolygon(ctx, transform.x, transform.y, this.angle, this.scale, this.polygon, this.color);
@@ -1153,7 +1176,7 @@ class Trunk {
         this.x = x;
         this.y = y;
         this.done = false;
-        this.color = randomDarkenedTrunkColor();
+        this.darken = getRandomFloat(0, 0.5);
         this.lowHealthColor = [70, 45, 30];
         this.health = 100;
         this.angle = Math.random() * Math.PI * 2;
@@ -1204,6 +1227,9 @@ class Trunk {
             this.health = 100;
             spawnNearbyBlock(this.x, this.y, trunkOvershootBlockRange);
         }
+    }
+    get color(){
+        return darkenedTrunkColor(this.darken);
     }
     get sizeMultiplier(){
         return Math.max(0.3, 2 - this.health / 100);
@@ -1345,30 +1371,145 @@ class Car {
         canvasdraw.save();
         canvasdraw.globalAlpha = 0.6;
         drawRectangle(bodyColor, transform, bodySize);
-        drawRectangle("rgba(44,56,62,255)", transform2, headSize);
+        drawRectangle(currentTheme.carHead, transform2, headSize);
         canvasdraw.restore();
     }
 }
 
 let colorAssociations = [[]];
 
-let blockOutlineColor = "rgba(44,56,62,255)";
-let allColorStrings =
-    ["B", "R", "O", "U", "G"];
-let allColorsRgb = [
-    [44, 56, 62],
-    [220, 118, 48],
-    [244, 232, 204],
-    [28, 110, 116],
-    [196, 200, 200],];
+let themes = {
+    classic: {
+        label: "Classic",
+        blockColors: [[0, 0, 0], [255, 0, 0], [255, 170, 0], [37, 94, 255], [0, 204, 0]],
+        legacyShapeEncoding: true,
+        blockOutline: null,
+        selection: "rgba(255,0,255,255)",
+        tokenDamageUp: "rgba(220,40,40,255)",
+        tokenDamageDown: "rgba(40,100,220,255)",
+        tokenToggleOn: "rgba(255,255,255,255)",
+        tokenToggleOff: "rgba(0,0,0,255)",
+        tokenDefault: "rgba(255,255,255,255)",
+        checkerA: "rgba(255,215,0,255)",
+        checkerB: "rgba(255,140,0,255)",
+        star: "rgba(255,215,0,255)",
+        carColors: null,
+        carHead: "rgba(0,0,0,255)",
+        trunkBase: "rgba(128,0,0,255)",
+    },
+    muted: {
+        label: "Muted",
+        blockColors: [[44, 56, 62], [220, 118, 48], [244, 232, 204], [28, 110, 116]],
+        legacyShapeEncoding: false,
+        blockOutline: "rgba(44,56,62,255)",
+        blockOutlineWidth: 1.5,
+        selection: "rgba(255,190,80,255)",
+        tokenDamageUp: "rgba(212,120,60,255)",
+        tokenDamageDown: "rgba(52,160,164,255)",
+        tokenToggleOn: "rgba(224,208,184,255)",
+        tokenToggleOff: "rgba(44,56,62,255)",
+        tokenDefault: "rgba(224,208,184,255)",
+        checkerA: "rgba(224,208,184,255)",
+        checkerB: "rgba(212,120,60,255)",
+        star: "rgba(255,190,80,255)",
+        carColors: ["rgba(220,118,48,255)", "rgba(28,110,116,255)", "rgba(44,56,62,255)", "rgba(244,232,204,255)"],
+        carHead: "rgba(44,56,62,255)",
+        trunkBase: "rgba(120,80,60,255)",
+    },
+    colorful: {
+        label: "Colorful",
+        blockColors: [[44, 56, 62], [255, 0, 0], [255, 170, 0], [37, 94, 255], [0, 204, 0]],
+        // Every block pairs one bright color with one neutral, never two brights (no red with blue).
+        neutralColorIndices: [0],
+        brightColorIndices: [1, 3, 4],
+        legacyShapeEncoding: false,
+        blockOutline: "rgba(44,56,62,255)",
+        blockOutlineWidth: 0.25,
+        selection: "rgba(255,0,255,255)",
+        tokenDamageUp: "rgba(220,40,40,255)",
+        tokenDamageDown: "rgba(40,100,220,255)",
+        tokenToggleOn: "rgba(220,218,212,255)",
+        tokenToggleOff: "rgba(44,56,62,255)",
+        tokenDefault: "rgba(220,218,212,255)",
+        checkerA: "rgba(220,218,212,255)",
+        checkerB: "rgba(255,170,0,255)",
+        star: "rgba(255,215,0,255)",
+        carColors: ["rgba(255,0,0,255)", "rgba(255,170,0,255)", "rgba(37,94,255,255)", "rgba(0,204,0,255)", "rgba(44,56,62,255)"],
+        carHead: "rgba(44,56,62,255)",
+        trunkBase: "rgba(120,80,60,255)",
+    },
+};
+let themeOrder = [themes.classic, themes.muted, themes.colorful];
+let currentTheme = themes.classic;
 
-function stringToColor(color){
-    let index = allColorStrings.indexOf(color);
-    if (index >= 0){
-        return colorFromArray(allColorsRgb[index]);
+function blendRgb(baseRgb, targetRgb, factor){
+    return [
+        Math.round(baseRgb[0] + (targetRgb[0] - baseRgb[0]) * factor),
+        Math.round(baseRgb[1] + (targetRgb[1] - baseRgb[1]) * factor),
+        Math.round(baseRgb[2] + (targetRgb[2] - baseRgb[2]) * factor),
+    ];
+}
+
+let neutralShadeFactor = 0.85;
+
+function themeColorPairs(theme){
+    if (theme.colorPairs) { return theme.colorPairs; }
+
+    let pairs = [];
+    if (theme.brightColorIndices){
+        // Each bright is paired with a shaded twin of itself (blended toward each neutral at
+        // neutralShadeFactor), not with the neutral's own raw color. Computed once here and
+        // appended to blockColors, so every later lookup (setSort, etc.) just reuses the cached entry.
+        for (var bright of theme.brightColorIndices){
+            let brightRgb = theme.blockColors[bright];
+            for (var neutral of theme.neutralColorIndices){
+                let neutralRgb = theme.blockColors[neutral];
+                let shadedRgb = blendRgb(brightRgb, neutralRgb, neutralShadeFactor);
+                let shadedIndex = theme.blockColors.push(shadedRgb) - 1;
+
+                pairs.push([bright, shadedIndex]);
+                pairs.push([shadedIndex, bright]);
+            }
+        }
+    } else {
+        // Every ordered pair of distinct colors, color1 varying fastest.
+        let colorCount = theme.blockColors.length;
+        for (let second = 0; second < colorCount - 1; second++){
+            for (let first = 0; first < colorCount; first++){
+                pairs.push([first, second < first ? second : second + 1]);
+            }
+        }
     }
+    theme.colorPairs = pairs;
+    return pairs;
+}
 
-    return null;
+function applyTheme(theme){
+    currentTheme = theme;
+
+    for (var row of map){
+        for (var block of row){
+            if (block.sort !== -1){ block.setSort(block.sort); }
+        }
+    }
+    for (var c of cars){
+        c.color = randomCarColor();
+    }
+    for (var e of effects){
+        if (e instanceof Star){ e.color = theme.star; }
+    }
+    trunkLayerDirty = true;
+    branchLayerDirty = true;
+
+    let themeButton = document.getElementById("themeButton");
+    if (themeButton){
+        themeButton.textContent = "Theme: " + theme.label;
+    }
+}
+
+function toggleTheme(){
+    let next = (themeOrder.indexOf(currentTheme) + 1) % themeOrder.length;
+    applyTheme(themeOrder[next]);
 }
 
 function colorFromArray(colorarray){
@@ -1382,6 +1523,35 @@ function coloring(input, dividend){
     };
 }
 
+function triggerBlockShine(block){
+    block.shineActive = true;
+    block.shineT = 0;
+    gsap.to(block, {
+        shineT: 1,
+        duration: scaledDuration(0.8),
+        ease: "power1.inOut",
+        onComplete: () => { block.shineActive = false; },
+    });
+}
+
+function maybeTriggerRandomShines(dtSeconds){
+    // Each block independently rolls this frame's chance; summed across all of them, the board-wide
+    // rate works out to ln(2) / blockShineHalfLifeSeconds, i.e. one shine every blockShineMeanIntervalSeconds on average.
+    let totalBlocks = (gridWidth + 1) * (gridHeight + 1);
+    let boardRatePerSecond = Math.LN2 / blockShineHalfLifeSeconds;
+    let perBlockProbability = (boardRatePerSecond * dtSeconds) / totalBlocks;
+
+    for (var j = 0; j <= gridHeight; j++){
+        for (var i = 0; i <= gridWidth; i++){
+            let block = map[j][i];
+            if (block.removed || block.token || block.shineActive) { continue; }
+            if (Math.random() < perBlockProbability){
+                triggerBlockShine(block);
+            }
+        }
+    }
+}
+
 class Block {
     constructor(x, y, radius){
         this.x = x;
@@ -1393,6 +1563,8 @@ class Block {
         this.spawnAngle = 0;
         this.spawnAlpha = 1;
         this.token = null;
+        this.shineActive = false;
+        this.shineT = 0;
     }
     move(){
     }
@@ -1400,18 +1572,36 @@ class Block {
         this.sort = sort;
         if (this.sort === -1){ return; }
 
-        let step1color = coloring(this.sort, 5);
-        let step2color = coloring(step1color.remains, 4);
-        let step3color = coloring(step2color.remains, 5);
+        if (currentTheme.legacyShapeEncoding){
+            // The exact original color1 -> color2 -> shape formula and dividends (5, 4, 5), kept
+            // as a selectable option: at the default sort count this always lands on shape 0, just
+            // like before this file ever had a Muted theme or extra shapes.
+            let step1color = coloring(this.sort, 5);
+            let step2color = coloring(step1color.remains, 4);
+            let step3color = coloring(step2color.remains, 5);
 
-        let index1 = step1color.value;
-        let index2 = step2color.value;
-        let index3 = step3color.value;
-        // let colorpair = this.allcolors[index1];
-        this.drawingType = index3;
-        index2 = index2 < index1 ? index2 : index2 + 1;
-        this.color1 = stringToColor(allColorStrings[index1]);
-        this.color2 = stringToColor(allColorStrings[index2]);           
+            let index1 = step1color.value;
+            let index2 = step2color.value;
+            index2 = index2 < index1 ? index2 : index2 + 1;
+
+            this.drawingType = step3color.value;
+            this.color1 = colorFromArray(currentTheme.blockColors[index1]);
+            this.color2 = colorFromArray(currentTheme.blockColors[index2]);
+            return;
+        }
+
+        // Distinct combos = (allowed color pairs) * blockShapeCount: Muted 12 * 7 = 84, Colorful 16 * 7 = 112.
+        // The color pair varies fastest, so low sort counts use every color with the first shape only,
+        // and further shapes (in order) appear only once the sort count exceeds the number of pairs.
+        let pairs = themeColorPairs(currentTheme);
+
+        let pairStep = coloring(this.sort, pairs.length);
+        let shapeStep = coloring(pairStep.remains, blockShapeCount);
+        let pair = pairs[pairStep.value];
+
+        this.drawingType = shapeStep.value;
+        this.color1 = colorFromArray(currentTheme.blockColors[pair[0]]);
+        this.color2 = colorFromArray(currentTheme.blockColors[pair[1]]);
     }
     draw(){
         if (this.removed === true){
@@ -1468,20 +1658,70 @@ class Block {
             drawRectangle(color1, innertransform2, 0.25 * this.radius, this.radius);
         }
         if (index3 === 3) {
+            // A ring/target pattern, not just case 0 with color1 and color2 swapped: swapping colors
+            // on this shape can't reproduce (or be reproduced by) any other shape here, unlike the old
+            // case 3, which was pixel-identical to case 0 with color1 and color2 traded — two different
+            // sorts could render as the same block, making them unmatchable but visually identical.
             drawRectangle(color2, transform, this.radius);
-            let innertransform = position(this.x + this.radius/4, this.y + this.radius/4);
-            drawRectangle(color1, innertransform, this.radius/2);
+            let ringInset = this.radius * 0.22;
+            let ringTransform = position(this.x + ringInset, this.y + ringInset);
+            drawRectangle(color1, ringTransform, this.radius - ringInset * 2);
+            let coreInset = this.radius * 0.4;
+            let coreTransform = position(this.x + coreInset, this.y + coreInset);
+            drawRectangle(color2, coreTransform, this.radius - coreInset * 2);
+        }
+        if (index3 === 4) {
+            drawRectangle(color2, transform, this.radius);
+            let dotCenter = position(this.x + this.radius / 2, this.y + this.radius / 2);
+            canvasdraw.beginPath();
+            canvasdraw.arc(dotCenter.x, dotCenter.y, this.radius * 0.18, 0, Math.PI * 2);
+            canvasdraw.fillStyle = color1;
+            canvasdraw.fill();
+        }
+        if (index3 === 5) {
+            drawRectangle(color2, transform, this.radius);
+            let dotCenter = position(this.x + this.radius / 2, this.y + this.radius / 2);
+            canvasdraw.beginPath();
+            canvasdraw.arc(dotCenter.x, dotCenter.y, this.radius * 0.4, 0, Math.PI * 2);
+            canvasdraw.fillStyle = color1;
+            canvasdraw.fill();
+        }
+        if (index3 === 6) {
+            drawRectangle(color2, transform, this.radius);
+            let barThickness = this.radius * 0.28;
+            let hBarTransform = position(this.x, this.y + (this.radius - barThickness) / 2);
+            drawRectangle(color1, hBarTransform, this.radius, barThickness);
+            let vBarTransform = position(this.x + (this.radius - barThickness) / 2, this.y);
+            drawRectangle(color1, vBarTransform, barThickness, this.radius);
+        }
+
+        if (this.shineActive){
+            // A diagonal highlight band sweeping across the block, confined to the same clip as the
+            // shape above. Alpha follows sin(sweep * pi): zero at both ends, peak at the midpoint.
+            let sweep = this.shineT;
+            let alpha = Math.sin(sweep * Math.PI) * 0.5;
+            let bandWidth = this.radius * 0.35;
+            let travel = -bandWidth + sweep * (this.radius * 2 + bandWidth * 2);
+
+            canvasdraw.save();
+            canvasdraw.translate(transform.x + this.radius / 2, transform.y + this.radius / 2);
+            canvasdraw.rotate(Math.PI / 4);
+            canvasdraw.fillStyle = "rgba(255,255,255," + alpha + ")";
+            canvasdraw.fillRect(travel - this.radius, -this.radius, bandWidth, this.radius * 2);
+            canvasdraw.restore();
         }
 
         canvasdraw.restore();
 
-        traceRoundedRectPath(transform.x, transform.y, this.radius, cornerRadius);
-        canvasdraw.strokeStyle = blockOutlineColor;
-        canvasdraw.lineWidth = 1.5;
-        canvasdraw.stroke();
+        if (currentTheme.blockOutline !== null){
+            traceRoundedRectPath(transform.x, transform.y, this.radius, cornerRadius);
+            canvasdraw.strokeStyle = currentTheme.blockOutline;
+            canvasdraw.lineWidth = currentTheme.blockOutlineWidth;
+            canvasdraw.stroke();
+        }
 
         if (this.selected === selectionIndex){
-            drawVoidRoundedRectangle("rgba(255,190,80,255)", transform, this.radius, cornerRadius);
+            drawVoidRoundedRectangle(currentTheme.selection, transform, this.radius, cornerRadius);
         }
 
         canvasdraw.restore();
@@ -1528,8 +1768,8 @@ function drawCheckerboard(transform, size, cornerRadius, swapped){
     let y = transform.y;
     let cellCount = 4;
     let cellSize = size / cellCount;
-    let colorA = "rgba(224,208,184,255)";
-    let colorB = "rgba(212,120,60,255)";
+    let colorA = currentTheme.checkerA;
+    let colorB = currentTheme.checkerB;
 
     canvasdraw.save();
     traceRoundedRectPath(x, y, size, cornerRadius);
@@ -1752,6 +1992,8 @@ function animate(timestamp){
         return;
     }
     lastFrameTime = timestamp - (elapsed % frameInterval);
+
+    maybeTriggerRandomShines(frameInterval / 1000);
 
     canvasdraw.fillStyle = "rgba(255, 255, 255, 0.75)";
     canvasdraw.fillRect(0, 0, canvas.width, canvas.height);
