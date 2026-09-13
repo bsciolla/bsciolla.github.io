@@ -1438,9 +1438,33 @@ let themes = {
         carHead: "rgba(44,56,62,255)",
         trunkBase: "rgba(120,80,60,255)",
     },
+    colorlight: {
+        label: "Colorlight",
+        // Same structure as Colorful (bright + shaded-twin pairing), with lighter, softer hues:
+        // red pushed whiter and toward purple/pink, blue pushed lighter and toward turquoise, and
+        // orange standing in for green as the third bright.
+        blockColors: [[44, 56, 62], [245, 45, 75], [255, 165, 30], [35, 183, 178]],
+        neutralColorIndices: [0],
+        brightColorIndices: [1, 2, 3],
+        legacyShapeEncoding: false,
+        blockOutline: "rgba(44,56,62,255)",
+        blockOutlineWidth: 0.25,
+        selection: "rgba(255,0,255,255)",
+        tokenDamageUp: "rgba(220,50,80,255)",
+        tokenDamageDown: "rgba(35,155,155,255)",
+        tokenToggleOn: "rgba(220,218,212,255)",
+        tokenToggleOff: "rgba(44,56,62,255)",
+        tokenDefault: "rgba(220,218,212,255)",
+        checkerA: "rgba(220,218,212,255)",
+        checkerB: "rgba(255,165,30,255)",
+        star: "rgba(255,215,0,255)",
+        carColors: ["rgba(245,45,75,255)", "rgba(255,165,30,255)", "rgba(35,183,178,255)", "rgba(44,56,62,255)"],
+        carHead: "rgba(44,56,62,255)",
+        trunkBase: "rgba(120,80,60,255)",
+    },
 };
-let themeOrder = [themes.classic, themes.muted, themes.colorful];
-let currentTheme = themes.classic;
+let themeOrder = [themes.classic, themes.muted, themes.colorful, themes.colorlight];
+let currentTheme = themes.colorlight;
 
 function blendRgb(baseRgb, targetRgb, factor){
     return [
