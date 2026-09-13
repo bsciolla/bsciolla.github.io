@@ -5,6 +5,9 @@ const canvasdraw = canvas.getContext("2d");
 let map = [];
 let cars = [];
 let effects = [];
+let trunks = [];
+let branches = [];
+let trunkLinks = [];
 let paused = false;
 let targetFps = 60;
 let frameInterval = 1000 / targetFps;
@@ -14,6 +17,7 @@ let score = 0;
 let height = 20;
 let gridSize = 50;
 let blockSize = 40;
+let blockCornerRadiusFactor = 0.18;
 let originx = 0;
 let originy = 0;
 let previousSelectedBlock = null;
@@ -39,6 +43,8 @@ let tokenLifespanRemovals = 4;
 let tokenTypes = ["damageUp", "damageDown", "starEatToggle"];
 let damageTokenCounter = 0;
 let starsEatable = false;
+let maxCarSpawnedTrunks = 1;
+let carSpawnedTrunkCount = 0;
 let activeTokenBlocks = [];
 let randomMode = false;
 let randomModeStuck = false;
@@ -49,6 +55,17 @@ let closeRange = 5;
 let miniMargin = 0;
 canvas.height = gridSize * gridHeight;
 canvas.width = gridSize * gridWidth;
+
+// Settled branches never change, so they are drawn once into this layer; trunks are redrawn into theirs only when marked dirty.
+const branchLayer = document.createElement("canvas");
+branchLayer.width = canvas.width;
+branchLayer.height = canvas.height;
+const branchLayerDraw = branchLayer.getContext("2d");
+const trunkLayer = document.createElement("canvas");
+trunkLayer.width = canvas.width;
+trunkLayer.height = canvas.height;
+const trunkLayerDraw = trunkLayer.getContext("2d");
+let trunkLayerDirty = true;
 const mouse = {
     x: undefined,
     y: undefined
@@ -180,6 +197,7 @@ function relateElements(block1, block2){
     let possible1 = squareMatch(block1, block2);
     if (possible1){
         match(block1, block2, 2);
+        return true;
     } else {
         let possible =
             followALineMatchX(block1, block2, 1)
@@ -482,15 +500,19 @@ function match(block1, block2, turns){
 
     let newCars = [];
     let newStars = [];
+    let newTrunks = [];
 
-    applyBlockRemovalDamage(block1, newCars, newStars);
-    applyBlockRemovalDamage(block2, newCars, newStars);
+    applyBlockRemovalDamage(block1, newCars, newStars, newTrunks);
+    applyBlockRemovalDamage(block2, newCars, newStars, newTrunks);
 
     applyStarDamage(block1, newStars);
     applyStarDamage(block2, newStars);
 
     applyStarMovement(block1, newStars);
     applyStarMovement(block2, newStars);
+
+    applyTrunkDamage(block1, newTrunks);
+    applyTrunkDamage(block2, newTrunks);
 
     triggerCarMovementBurst();
 
@@ -508,6 +530,8 @@ function match(block1, block2, turns){
     checkScenarioCompletion();
 
     maybeSpawnTokenFromRemoval(block1, block2);
+
+    propagateTrunkLinks();
 }
 
 function effectiveBlockDamage(){
@@ -530,7 +554,11 @@ function starHitDamage(distance){
     return computeHitDamage(distance, 2 * gridSize, 6 * gridSize);
 }
 
-function applyBlockRemovalDamage(block, newCars, newStars){
+function trunkHitDamage(distance){
+    return computeHitDamage(distance, 2 * gridSize, 6 * gridSize);
+}
+
+function applyBlockRemovalDamage(block, newCars, newStars, newTrunks){
     let centerX = block.x + block.radius / 2;
     let centerY = block.y + block.radius / 2;
 
@@ -552,7 +580,7 @@ function applyBlockRemovalDamage(block, newCars, newStars){
         }
     }
     for (var dead of deadCars){
-        respawnCar(dead, newCars, newStars);
+        respawnCar(dead, newCars, newStars, newTrunks);
     }
 }
 
@@ -575,6 +603,60 @@ function applyStarDamage(block, newStars){
             }
         }
     }
+}
+
+function applyTrunkDamage(block, newTrunks){
+    let centerX = block.x + block.radius / 2;
+    let centerY = block.y + block.radius / 2;
+
+    let closest = null;
+    let closestDistance = Infinity;
+    for (var e of trunks){
+        if (newTrunks.includes(e)) { continue; }
+
+        let dx = e.x - centerX;
+        let dy = e.y - centerY;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < closestDistance){
+            closestDistance = distance;
+            closest = e;
+        }
+    }
+
+    if (closest === null) { return; }
+
+    let damage = trunkHitDamage(closestDistance);
+    if (damage > 0){
+        closest.loseHealth(damage);
+    }
+}
+
+function propagateTrunkLinks(){
+    let degree = new Map();
+    for (var link of trunkLinks){
+        degree.set(link.a, (degree.get(link.a) || 0) + 1);
+        degree.set(link.b, (degree.get(link.b) || 0) + 1);
+    }
+
+    // Metropolis weights keep the averaging stable and conserve total health regardless of link count.
+    let deltas = new Map();
+    for (var link of trunkLinks){
+        let weight = trunkLinkDiffusionRate / (1 + Math.max(degree.get(link.a), degree.get(link.b)));
+        let flow = weight * (link.b.health - link.a.health);
+        deltas.set(link.a, (deltas.get(link.a) || 0) + flow);
+        deltas.set(link.b, (deltas.get(link.b) || 0) - flow);
+    }
+    for (var [trunk, delta] of deltas){
+        trunk.health += delta;
+    }
+
+    for (var trunk of trunks.slice()){
+        if (trunk.health < trunkRegenThreshold){
+            trunk.regen();
+        }
+    }
+
+    trunkLayerDirty = true;
 }
 
 function spawnMissRate(candidate){
@@ -602,6 +684,7 @@ function spawnMissRate(candidate){
 
 function spawnNearbyBlock(x, y, rangeInGrid){
     let range = rangeInGrid * gridSize;
+    let minRange = range / 2;
     let candidates = [];
 
     for (var j = 0; j <= gridHeight; j++) {
@@ -614,7 +697,7 @@ function spawnNearbyBlock(x, y, rangeInGrid){
             let dx = centerX - x;
             let dy = centerY - y;
             let distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < range){
+            if (distance >= minRange && distance < range){
                 candidates.push(candidate);
             }
         }
@@ -662,6 +745,64 @@ function findClosestOtherStar(star){
     return { star: closest, distance: closestDistance };
 }
 
+let closestTrunkSearchRange = 5 * blockSize;
+
+function closestTrunksTo(x, y, count, exclude){
+    let maxDistanceSquared = closestTrunkSearchRange * closestTrunkSearchRange;
+    let nearby = trunks.filter(t => {
+        if (t === exclude) { return false; }
+        let dx = t.x - x;
+        let dy = t.y - y;
+        return dx * dx + dy * dy <= maxDistanceSquared;
+    });
+    nearby.sort((a, b) => {
+        let da = (a.x - x) * (a.x - x) + (a.y - y) * (a.y - y);
+        let db = (b.x - x) * (b.x - x) + (b.y - y) * (b.y - y);
+        return da - db;
+    });
+    return nearby.slice(0, count);
+}
+
+let angleNoiseFactor = 0.25;
+let trunkHealthInjectionFactor = 1.0;
+let trunkOvershootBlockRange = 3;
+let trunkLinkDiffusionRate = 1.0;
+let trunkRegenThreshold = 50;
+
+function pickAvoidingAngle(x, y, distance, neighbors, fallbackAngle){
+    if (neighbors.length === 0){
+        return fallbackAngle;
+    }
+
+    let noiseAmount = distance * angleNoiseFactor;
+    let sampleCount = 30;
+    let bestAngle = fallbackAngle;
+    let bestScore = -Infinity;
+    for (let i = 0; i < sampleCount; i++){
+        let theta = i * (2 * Math.PI / sampleCount);
+        let candidateX = x + distance * Math.cos(theta);
+        let candidateY = y + distance * Math.sin(theta);
+
+        let minDistance = Infinity;
+        for (var neighbor of neighbors){
+            let dx = candidateX - neighbor.x;
+            let dy = candidateY - neighbor.y;
+            let neighborDistance = Math.sqrt(dx * dx + dy * dy);
+            if (neighborDistance < minDistance){
+                minDistance = neighborDistance;
+            }
+        }
+
+        let noisyScore = minDistance + getRandomFloat(-noiseAmount, noiseAmount);
+        if (noisyScore > bestScore){
+            bestScore = noisyScore;
+            bestAngle = theta;
+        }
+    }
+
+    return bestAngle;
+}
+
 function applyStarMovement(block, newStars){
     let centerX = block.x + block.radius / 2;
     let centerY = block.y + block.radius / 2;
@@ -707,16 +848,23 @@ function randomCarColor(){
     return "rgba(" + r + "," + g + "," + b + ",255)";
 }
 
-function respawnCar(deadCar, newCars, newStars){
+function respawnCar(deadCar, newCars, newStars, newTrunks){
     let index = cars.indexOf(deadCar);
     if (index === -1) { return; }
     cars.splice(index, 1);
 
-    let starCount = effects.filter(e => e instanceof Star).length;
-    if (starCount < maxStars){
-        let star = new Star(deadCar.x, deadCar.y);
-        effects.push(star);
-        newStars.push(star);
+    if (currentScenario.starsEnabled){
+        let starCount = effects.filter(e => e instanceof Star).length;
+        if (starCount < maxStars){
+            let star = new Star(deadCar.x, deadCar.y);
+            effects.push(star);
+            newStars.push(star);
+        }
+    } else if (carSpawnedTrunkCount < maxCarSpawnedTrunks){
+        let trunk = new Trunk(deadCar.x, deadCar.y);
+        trunks.push(trunk);
+        newTrunks.push(trunk);
+        carSpawnedTrunkCount++;
     }
 
     let desiredSpawns = 2 + pendingCarSpawns;
@@ -851,6 +999,181 @@ class Star {
         canvasdraw.fillStyle = displayColor;
         canvasdraw.fillRect(-size / 2, -size / 2, size, size);
         canvasdraw.restore();
+    }
+}
+
+function generateIrregularRectPolygon(width, height, jitterFactor){
+    let halfW = width / 2;
+    let halfH = height / 2;
+    let pointsPerSide = 3;
+    let jitter = width * jitterFactor;
+    let corners = [
+        { x: -halfW, y: -halfH },
+        { x: halfW, y: -halfH },
+        { x: halfW, y: halfH },
+        { x: -halfW, y: halfH },
+    ];
+
+    let points = [];
+    for (let side = 0; side < corners.length; side++){
+        let start = corners[side];
+        let end = corners[(side + 1) % corners.length];
+        for (let p = 0; p < pointsPerSide; p++){
+            let t = p / pointsPerSide;
+            let baseX = start.x + (end.x - start.x) * t;
+            let baseY = start.y + (end.y - start.y) * t;
+            points.push({
+                x: baseX + getRandomFloat(-jitter, jitter),
+                y: baseY + getRandomFloat(-jitter, jitter),
+            });
+        }
+    }
+    return points;
+}
+
+function drawIrregularPolygon(ctx, x, y, angle, scale, polygon, color){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(polygon[0].x, polygon[0].y);
+    for (let i = 1; i < polygon.length; i++){
+        ctx.lineTo(polygon[i].x, polygon[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+function rebuildTrunkLayer(){
+    trunkLayerDraw.clearRect(0, 0, trunkLayer.width, trunkLayer.height);
+    for (var t of trunks){
+        if (t.settled){ t.draw(trunkLayerDraw); }
+    }
+    trunkLayerDirty = false;
+}
+
+function randomDarkenedTrunkColor(){
+    return blendColor("rgba(128,0,0,255)", [0, 0, 0], getRandomFloat(0, 0.5));
+}
+
+class Branch {
+    constructor(x, y, angle, spawnDelay){
+        this.x = x;
+        this.y = y;
+        this.done = false;
+        this.color = randomDarkenedTrunkColor();
+        this.angle = angle;
+        this.width = 22;
+        this.height = 32;
+        this.polygon = generateIrregularRectPolygon(this.width, this.height, 0.18);
+
+        this.scale = 0;
+        this.settled = false;
+        gsap.to(this, {
+            scale: 1,
+            duration: scaledDuration(0.5),
+            delay: scaledDuration(spawnDelay || 0),
+            ease: "back.out(2)",
+            onComplete: () => {
+                this.settled = true;
+                this.draw(branchLayerDraw);
+            },
+        });
+    }
+    draw(ctx){
+        let transform = position(this.x, this.y);
+        drawIrregularPolygon(ctx, transform.x, transform.y, this.angle, this.scale, this.polygon, this.color);
+    }
+}
+
+class Trunk {
+    constructor(x, y, spawnDelay){
+        this.x = x;
+        this.y = y;
+        this.done = false;
+        this.color = randomDarkenedTrunkColor();
+        this.lowHealthColor = [70, 45, 30];
+        this.health = 100;
+        this.angle = Math.random() * Math.PI * 2;
+        this.width = 22;
+        this.height = 32;
+        this.polygon = generateIrregularRectPolygon(this.width, this.height, 0.18);
+        this.spawnedTrunk = null;
+
+        this.spawnScale = 0;
+        this.settled = false;
+        gsap.to(this, {
+            spawnScale: 1,
+            duration: scaledDuration(0.5),
+            delay: scaledDuration(spawnDelay || 0),
+            ease: "back.out(2)",
+            onComplete: () => {
+                this.settled = true;
+                trunkLayerDirty = true;
+            },
+        });
+    }
+    loseHealth(amount){
+        let wasAlive = this.health > 0;
+        this.health = Math.max(0, this.health - amount);
+        if (wasAlive && this.health <= 0){
+            this.spawnAdjacentTrunk();
+        }
+        this.injectHealthToNeighbors(amount);
+    }
+    injectHealthToNeighbors(damageAmount){
+        if (this.spawnedTrunk === null) { return; }
+        this.spawnedTrunk.gainHealth(damageAmount * trunkHealthInjectionFactor);
+    }
+    gainHealth(amount){
+        let wasUnderCap = this.health <= 100;
+        this.health += amount;
+        if (wasUnderCap && this.health > 100){
+            this.health = 100;
+            spawnNearbyBlock(this.x, this.y, trunkOvershootBlockRange);
+        }
+    }
+    get sizeMultiplier(){
+        return Math.max(0.3, 2 - this.health / 100);
+    }
+    regen(){
+        this.spawnAdjacentTrunk();
+    }
+    spawnAdjacentTrunk(){
+        let distance = 1.5 * blockSize;
+        let branchCount = 3;
+        let branchStagger = 0.3;
+
+        let neighbors = closestTrunksTo(this.x, this.y, 4, this);
+        let angle = pickAvoidingAngle(this.x, this.y, distance, neighbors, Math.random() * Math.PI * 2);
+
+        let child = new Trunk(
+            this.x + distance * Math.cos(angle),
+            this.y + distance * Math.sin(angle),
+            branchCount * branchStagger
+        );
+        trunks.push(child);
+        trunkLinks.push({ a: this, b: child });
+        this.spawnedTrunk = child;
+
+        for (let i = 1; i <= branchCount; i++){
+            let t = i / (branchCount + 1);
+            let branchX = this.x + (child.x - this.x) * t;
+            let branchY = this.y + (child.y - this.y) * t;
+
+            branches.push(new Branch(branchX, branchY, angle, (i - 1) * branchStagger));
+        }
+
+        this.health = 100;
+    }
+    draw(ctx){
+        let transform = position(this.x, this.y);
+        let lowHealthFactor = (100 - this.health) / 100;
+        let displayColor = blendColor(this.color, this.lowHealthColor, lowHealthFactor);
+        drawIrregularPolygon(ctx, transform.x, transform.y, this.angle, this.sizeMultiplier * this.spawnScale, this.polygon, displayColor);
     }
 }
 
@@ -1033,8 +1356,9 @@ class Block {
         canvasdraw.globalAlpha = this.spawnAlpha;
 
         let transform = position(this.x, this.y);
+        let cornerRadius = this.radius * blockCornerRadiusFactor;
         if (this.selected === selectionIndex){
-            drawVoidRectangle("rgba(255,0,255,255)", transform, this.radius);
+            drawVoidRoundedRectangle("rgba(255,0,255,255)", transform, this.radius, cornerRadius);
         }
 
         if (this.token){
@@ -1049,6 +1373,11 @@ class Block {
         let color1 = this.color1;
         let color2 = this.color2;
         let index3 = this.drawingType;
+
+        canvasdraw.save();
+        traceRoundedRectPath(transform.x, transform.y, this.radius, cornerRadius);
+        canvasdraw.clip();
+
         if (index3 === 0) {
             let innertransform1 = position(this.x, this.y);
             drawRectangle(color1, innertransform1, this.radius);
@@ -1074,15 +1403,18 @@ class Block {
         }
 
         canvasdraw.restore();
+
+        canvasdraw.restore();
     }
 }
 
 
 
-function drawVoidRectangle(color, transform, radius){
+function drawVoidRoundedRectangle(color, transform, size, cornerRadius){
+    traceRoundedRectPath(transform.x, transform.y, size, cornerRadius);
     canvasdraw.strokeStyle = color;
     canvasdraw.lineWidth = 2;
-    canvasdraw.strokeRect(transform.x, transform.y, radius, radius);
+    canvasdraw.stroke();
 }
 
 function drawRectangle(color, transform, radius, radius2){
@@ -1155,17 +1487,26 @@ let scenarios = {
         name: "random",
         completionBlockCount: (gridWidth + 1) * (gridHeight + 1),
         initialCarCount: 2,
+        starsEnabled: true,
         setup: randomConformation,
     },
     tutorial: {
         name: "tutorial",
         completionBlockCount: 10,
         initialCarCount: 0,
+        starsEnabled: true,
+        setup: randomConformation,
+    },
+    tree: {
+        name: "tree",
+        completionBlockCount: (gridWidth + 1) * (gridHeight + 1),
+        initialCarCount: 2,
+        starsEnabled: false,
         setup: randomConformation,
     },
 };
 
-let currentScenario = scenarios.random;
+let currentScenario = scenarios.tree;
 let blocksRemovedCount = 0;
 let scenarioCompleted = false;
 
@@ -1209,9 +1550,17 @@ function init(){
         cars.push(new Car(x, y, randomCarColor()));
     }
     effects = [];
+    for (var oldTrunk of trunks){ gsap.killTweensOf(oldTrunk); }
+    for (var oldBranch of branches){ gsap.killTweensOf(oldBranch); }
+    trunks = [];
+    branches = [];
+    trunkLinks = [];
+    branchLayerDraw.clearRect(0, 0, branchLayer.width, branchLayer.height);
+    trunkLayerDirty = true;
     activeTokenBlocks = [];
     damageTokenCounter = 0;
     starsEatable = false;
+    carSpawnedTrunkCount = 0;
     randomModeStuck = false;
     let blocksToAttribute = [];
     for (var j = 0; j <= gridHeight; j++) {
@@ -1282,6 +1631,17 @@ function animate(timestamp){
     for (var e of effects){
         if (e.done || !(e instanceof Star)) { continue; }
         e.draw();
+    }
+    canvasdraw.drawImage(branchLayer, 0, 0);
+    for (var b of branches){
+        if (!b.settled){ b.draw(canvasdraw); }
+    }
+    if (trunkLayerDirty){
+        rebuildTrunkLayer();
+    }
+    canvasdraw.drawImage(trunkLayer, 0, 0);
+    for (var t of trunks){
+        if (!t.settled){ t.draw(canvasdraw); }
     }
 
     for (var j = 0; j <= gridHeight; j++) {
